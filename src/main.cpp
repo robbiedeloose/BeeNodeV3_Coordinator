@@ -44,6 +44,57 @@ void sendDataToESP() {
   Serial.println("ESP going to sleep");
 }
 
+void postDataToSparkFun(Payload2_t *payloadAddress) {
+  // Post Hive Data
+  //
+
+  Serial.println("Resetting ESP");
+  digitalWrite(resetPin, LOW);
+  delay(1000);
+  digitalWrite(resetPin, HIGH);
+  Serial.println("Waiting for ESP to start");
+  delay(3000);
+  Serial.println("Sending data to ESP");
+
+  Serial.println("Posting Data");
+
+  esp8266Module.print("http://192.168.10.191:1880/hiveonly");
+
+  esp8266Module.print("?");
+  esp8266Module.print("nodeId");
+  esp8266Module.print("=");
+  for (byte b : payloadAddress->id)
+    esp8266Module.print(b, HEX);
+
+  for (int i = 0; i < 3; i++) {
+    esp8266Module.print("&");
+    esp8266Module.print("temp");
+    esp8266Module.print(i + 1);
+    esp8266Module.print("=");
+    if (payloadAddress->temp[i] == -12700)
+      esp8266Module.print("-");
+    else
+      esp8266Module.print(payloadAddress->temp[i]);
+  }
+
+  esp8266Module.print("&");
+  esp8266Module.print("hum");
+  esp8266Module.print("=");
+  if (payloadAddress->humidity == 1500)
+    esp8266Module.print("-");
+  else
+    esp8266Module.print(payloadAddress->humidity);
+
+  esp8266Module.print("&");
+  esp8266Module.print("bat");
+  esp8266Module.print("=");
+  esp8266Module.print(payloadAddress->bat);
+
+  delay(1000);
+
+  Serial.println("ESP going to sleep");
+}
+
 void setup() {
   // put your setup code here, to run once:
   // Serial Start
@@ -92,7 +143,7 @@ void loop() {
     Serial.println(payload.temp[2], DEC);
     Serial.print(" Battery status: ");
     Serial.println(payload.bat, DEC);
-    sendDataToESP();
-    // postDataToSparkFun(&payload);
+    // sendDataToESP();
+    postDataToSparkFun(&payload);
   }
 }
