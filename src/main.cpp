@@ -146,4 +146,5 @@ void loop() {
     // sendDataToESP();
     postDataToSparkFun(&payload);
   }
+  network.sleepNode(0, 0);
 }
