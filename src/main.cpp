@@ -28,25 +28,9 @@ struct Payload2_t {
   uint8_t alarm;
 };
 
-void sendDataToESP() {
-  // esp8266Module
-  Serial.println("Resetting ESP");
-  digitalWrite(resetPin, LOW);
-  delay(1000);
-  digitalWrite(resetPin, HIGH);
-  Serial.println("Waiting for ESP to start");
-  delay(3000);
-  Serial.println("Sending data to ESP");
-  esp8266Module.print(
-      F("http://192.168.10.191:1880/hiveonly?fffff=dddddddddd"));
-  delay(1000);
-
-  Serial.println("ESP going to sleep");
-}
-
-void postDataToSparkFun(Payload2_t *payloadAddress) {
+void postData(Payload2_t *payloadAddress) {
   // Post Hive Data
-  //
+  // WIFI VERSION
 
   Serial.println("Resetting ESP");
   digitalWrite(resetPin, LOW);
@@ -58,7 +42,7 @@ void postDataToSparkFun(Payload2_t *payloadAddress) {
 
   Serial.println("Posting Data");
 
-  esp8266Module.print("http://192.168.10.191:1880/hiveonly");
+  esp8266Module.print("http://192.168.10.192:1880/hiveonly");
 
   esp8266Module.print("?");
   esp8266Module.print("nodeId");
@@ -115,6 +99,8 @@ void setup() {
   pinMode(resetPin, OUTPUT);
   digitalWrite(resetPin, HIGH);
   delay(10000);
+
+  network.setup_watchdog(9); // Sets the WDT to trigger every second
 }
 
 void loop() {
@@ -144,7 +130,13 @@ void loop() {
     Serial.print(" Battery status: ");
     Serial.println(payload.bat, DEC);
     // sendDataToESP();
-    postDataToSparkFun(&payload);
+    postData(&payload);
   }
-  network.sleepNode(0, 0);
+  Serial.println("Node going to sleep");
+  delay(500);
+  if (network.sleepNode(12, 0)) {
+    Serial.println("Timer met");
+  } else {
+    Serial.println("Interrupt");
+  }
 }
