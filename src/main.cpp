@@ -79,33 +79,26 @@ void postData(Payload2_t *payloadAddress) {
   Serial.println("ESP going to sleep");
 }
 
-void setup() {
-  // put your setup code here, to run once:
-  // Serial Start
-  Serial.begin(9600);
-  Serial.println("Serial started");
+void startCustomESP() {
   // esp8266Module
   esp8266Module.begin(9600);
-  delay(1000);
-  Serial.println("Soft Serial started");
-  // Serial end
-
+  delay(500); //------------
+  Serial.println("Soft Serial started at 9600");
   // start rf radio
-  Serial.println("Starting rf radio");
-  SPI.begin();
-  radio.begin();
-  network.begin(90, thisNode);
 
   pinMode(resetPin, OUTPUT);
   digitalWrite(resetPin, HIGH);
-  delay(10000);
+}
 
+void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
+  Serial.println("Starting rf radio");
+  SPI.begin();
+  radio.begin();
+  network.begin(channel, nodeAddress);
   network.setup_watchdog(9); // Sets the WDT to trigger every second
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-
+void checkForNetworkData() {
   // check network communication regularly
   network.update();
 
@@ -132,6 +125,22 @@ void loop() {
     // sendDataToESP();
     postData(&payload);
   }
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  // Serial Start
+  Serial.begin(9600);
+  Serial.println("BeeNode Coordinator v0.1");
+  startCustomESP();
+  startRFRadio(90, thisNode);
+  delay(10000);
+}
+
+void loop() {
+
+  checkForNetworkData();
+
   Serial.println("Node going to sleep");
   delay(500);
   if (network.sleepNode(12, 0)) {
