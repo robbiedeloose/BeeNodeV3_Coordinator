@@ -1,25 +1,63 @@
 #include <Arduino.h>
-#include <SoftwareSerial.h>
 
+#define DEBUG
+
+#ifdef DEBUG
+#define DEBUG_PRINT(x) Serial.print(x)
+#define DEBUG_PRINTDEC(x) Serial.print(x, DEC)
+#define DEBUG_PRINTHEX(x) Serial.print(x, HEX)
+#define DEBUG_PRINTLN(x) Serial.println(x)
+#else
+#define DEBUG_PRINT(x)
+#define DEBUG_PRINTDEC(x)
+#define DEBUG_PRINTLN(x)
+#endif
+
+// PINS
+//#define ledPin 6 // might change to buzzerPin
+#define radioPin1 7
+#define radioPin2 8
+#define softSerialRx A0
+#define softSerialTx A1
+#define resetPin A2
+//#define alarmPin 3
+#define seedRef A3
+
+// wifi / ...
+#include <SoftwareSerial.h>
+SoftwareSerial esp8266Module(softSerialRx, softSerialTx); // RX, TX
+// radio
 #include <RF24.h>
 #include <RF24Network.h>
 #include <SPI.h>
+RF24 radio(7, 8);             // start RF24 communication layer
+RF24Network network(radio);   // start RF24 network layer
+const uint16_t thisNode = 00; // Coordinator address
 
-//#include <EEPROM.h>
-// OBJECTS
-SoftwareSerial esp8266Module(A0, A1); // RX, TX
-uint8_t resetPin = A2;
+// humidity
+#include "SparkFunHTU21D.h"
+#include <Wire.h>
+HTU21D myHumidity;
 
-///// RF24 DECLARATIONS ////////////////////////////////////////////////////////
-// start RF24 communication layer
-RF24 radio(7, 8);
-// start RF24 network layer
-RF24Network network(radio);
-// Coordinator address
-const uint16_t thisNode = 00;
+// EEPROM address locations
+#include <EEPROM.h>      //EEPROM
+#define EEPRomDeviceId 1 // 1 byte for #, 4 bytes for ID
+#define EEPRomOptions 6
+uint8_t nodeId[4];
+
+// own libraries //
+// NodeId
+#include "RandomNodeId.h"
+RandomNodeId beeNodeId;
+// Internal Voltage
+#include "MesureVoltageInternal.h"
+float iREF = 1.1;
+MesureVoltageInternal battery(iREF);
+
+#define numberOfSensors 3
+
 // Structure of our payload coming from router and end devices
-
-struct Payload2_t {
+struct Payload_t {
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
@@ -28,7 +66,17 @@ struct Payload2_t {
   uint8_t alarm;
 };
 
-void postData(Payload2_t *payloadAddress) {
+struct LocalData_t {
+  uint8_t baseId[4];
+  int16_t baseTemp;
+  uint16_t baseHum;
+  uint16_t baseLux;
+  uint16_t baseBat;
+  uint16_t baseWind;
+  uint16_t baseRain;
+};
+
+void postData(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
   // Post Hive Data
   // WIFI VERSION
 
@@ -50,7 +98,7 @@ void postData(Payload2_t *payloadAddress) {
   for (byte b : payloadAddress->id)
     esp8266Module.print(b, HEX);
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < numberOfSensors; i++) {
     esp8266Module.print("&");
     esp8266Module.print("temp");
     esp8266Module.print(i + 1);
@@ -79,21 +127,30 @@ void postData(Payload2_t *payloadAddress) {
   Serial.println("ESP going to sleep");
 }
 
+void addLocalData(LocalData_t *localDataAddress) {
+  localDataAddress->baseTemp = 1234;
+  localDataAddress->baseHum = 5678;
+}
+
 void startCustomESP() {
   // esp8266Module
   esp8266Module.begin(9600);
   delay(500); //------------
   Serial.println("Soft Serial started at 9600");
-  // start rf radio
-
   pinMode(resetPin, OUTPUT);
   digitalWrite(resetPin, HIGH);
 }
 
 void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
-  Serial.println("Starting rf radio");
+  Serial.print("Starting rf radio. ");
+  Serial.print("Channel: ");
+  Serial.print(channel);
+  Serial.print(", NodeAddress:  ");
+  Serial.println(nodeAddress);
+
   SPI.begin();
   radio.begin();
+  // radio.setPALevel(HIGH);
   network.begin(channel, nodeAddress);
   network.setup_watchdog(9); // Sets the WDT to trigger every second
 }
@@ -103,27 +160,43 @@ void checkForNetworkData() {
   network.update();
 
   RF24NetworkHeader header; // create header variable
-  Payload2_t payload;       // create payload variable
+  Payload_t payload;        // create payload variable
   // Any data on the network ready to read
   while (network.available()) {
     // If so, grab it and print it out
     network.read(header, &payload, sizeof(payload));
+
+    // Add coordinator Data
+    LocalData_t localData;
+    addLocalData(&localData);
+
+    // Display Node Data
     Serial.print("The node this is from: ");
     Serial.println(header.from_node);
     Serial.print("Node ID: ");
     for (byte b : payload.id)
       Serial.print(b, HEX);
     Serial.println();
-    Serial.print("Temperature1: ");
-    Serial.println(payload.temp[0], DEC);
-    Serial.print("Temperature2: ");
-    Serial.println(payload.temp[1], DEC);
-    Serial.print("Temperature3: ");
-    Serial.println(payload.temp[2], DEC);
+    for (int i = 0; i < numberOfSensors; i++) {
+      Serial.print("Temperature");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      if (payload.temp[i] == -12700)
+        Serial.println("-");
+      else
+        Serial.println(payload.temp[i], DEC);
+    }
     Serial.print(" Battery status: ");
     Serial.println(payload.bat, DEC);
+
+    // Display Local Data
+    Serial.print("Base temp: ");
+    Serial.println(localData.baseTemp, DEC);
+    Serial.print("Base hum: ");
+    Serial.println(localData.baseHum, DEC);
+
     // sendDataToESP();
-    postData(&payload);
+    postData(&payload, &localData);
   }
 }
 
@@ -131,21 +204,18 @@ void setup() {
   // put your setup code here, to run once:
   // Serial Start
   Serial.begin(9600);
-  Serial.println("BeeNode Coordinator v0.1");
+  Serial.println("BeeNode Coordinator v0");
   startCustomESP();
   startRFRadio(90, thisNode);
-  delay(10000);
+  delay(10000); // delay for reprogramming purposses
+
+  beeNodeId.getId(nodeId); // send array to fill as parameter
+  battery.setRefInternal();
 }
 
 void loop() {
-
   checkForNetworkData();
-
   Serial.println("Node going to sleep");
   delay(500);
-  if (network.sleepNode(12, 0)) {
-    Serial.println("Timer met");
-  } else {
-    Serial.println("Interrupt");
-  }
+  network.sleepNode(15, 0); // 15 cycles of 4 seconds
 }
