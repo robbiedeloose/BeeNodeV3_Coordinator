@@ -45,6 +45,11 @@ HTU21D myHumidity;
 #define EEPRomOptions 6
 uint8_t nodeId[4];
 
+//LUX
+#include <Wire.h>
+#include <AS_BH1750.h>
+AS_BH1750 sensor;
+
 // own libraries //
 // NodeId
 #include "RandomNodeId.h"
@@ -90,16 +95,20 @@ void postData(Payload_t *payloadAddress, LocalData_t *localDataAddress);
 
 void setup() {
   // put your setup code here, to run once:
-    initCoordinator();
+  initCoordinator();
   startCustomESP();
   startRFRadio(90, thisNode);
+  Serial.println("Started RF Radio");
   delay(10000); // delay for reprogramming purposses
-
+Serial.println("Get BeeNodeId");
   beeNodeId.getId(nodeId); // send array to fill as parameter
+  Serial.println("Set voltage Ref");
   battery.setRefInternal();
+  Serial.println("End Setup");
 }
 
 void loop() {
+  Serial.println("Start Loop");
   checkForNetworkData();
   Serial.println("Node going to sleep");
   delay(500);
@@ -112,10 +121,19 @@ void initCoordinator(){
   Serial.println("BeeNode Coordinator v0.1");
   battery.setRefInternal(); // Set voltage reference
   beeNodeId.getId(nodeId); // send array to fill as parameter
+  myHumidity.begin(); // start humidity sensor
+  // for normal sensor resolution (1 lx resolution, 0-65535 lx, 120ms, no PowerDown) use: sensor.begin(RESOLUTION_NORMAL, false);
+  // Initialize sensor. if sensor is not present, false is returned
+  if(sensor.begin()) {
+    Serial.println("Sensor initialized");
+  }
+  else {
+    Serial.println("Sensor not present");
+  }
   Serial.print("Coordinator Id: CO");
   for (byte b : nodeId)
     Serial.print(b, HEX);
-    Serial.println();
+  Serial.println();
 }
 
 void startCustomESP() {
@@ -135,10 +153,14 @@ void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
   Serial.println(nodeAddress);
 
   SPI.begin();
+  Serial.println("SPI started");
   radio.begin();
+  Serial.println("Radio started");
   // radio.setPALevel(HIGH);
   network.begin(channel, nodeAddress);
+  Serial.println("Network started");
   network.setup_watchdog(9); // Sets the WDT to trigger every second
+  Serial.println("Watchdog set");
 }
 
 
@@ -183,9 +205,11 @@ void checkForNetworkData() {
     Serial.print(" Base bat: ");
     Serial.println(localData.baseBat, DEC);
     Serial.print(" Base temp: ");
-    Serial.println(localData.baseTemp, DEC);
+    Serial.println(float(localData.baseTemp)/100, DEC);
     Serial.print(" Base hum: ");
     Serial.println(localData.baseHum, DEC);
+    Serial.print(" Base lux: ");
+    Serial.println(localData.baseLux, DEC);
 
     // sendDataToESP();
     postData(&payload, &localData);
@@ -195,9 +219,11 @@ void checkForNetworkData() {
 void addLocalData(LocalData_t *localDataAddress) {
   for (uint8_t i = 0; i < 4; i++) // fill nodeId
     localDataAddress->baseId[i] = nodeId[i];
-  localDataAddress->baseTemp = 1234;
-  localDataAddress->baseHum = 5678;
+  localDataAddress->baseTemp = myHumidity.readTemperature()*100;
+  localDataAddress->baseHum = myHumidity.readHumidity();
   localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
+  localDataAddress->baseLux = sensor.readLightLevel();
+//  localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
 //// Posting Data //////////////////////////////////////////////////////////////
@@ -246,6 +272,33 @@ void postData(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
   esp8266Module.print("bat");
   esp8266Module.print("=");
   esp8266Module.print(payloadAddress->bat);
+
+// coorddinator data
+  esp8266Module.print("?");
+  esp8266Module.print("coordId");
+  esp8266Module.print("=CO");
+  for (byte b : localDataAddress->baseId)
+    esp8266Module.print(b, HEX);
+
+  esp8266Module.print("&");
+  esp8266Module.print("baseBat");
+  esp8266Module.print("=");
+  esp8266Module.print(localDataAddress->baseBat);
+
+  esp8266Module.print("&");
+  esp8266Module.print("baseHum");
+  esp8266Module.print("=");
+  esp8266Module.print(localDataAddress->baseHum);
+
+  esp8266Module.print("&");
+  esp8266Module.print("baseBat");
+  esp8266Module.print("=");
+  esp8266Module.print(localDataAddress->baseTemp);
+
+  esp8266Module.print("&");
+  esp8266Module.print("baseLux");
+  esp8266Module.print("=");
+  esp8266Module.print(localDataAddress->baseLux);
 
   delay(1000);
 
