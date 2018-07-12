@@ -307,7 +307,7 @@ void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
 
   Serial.println("Posting Data");
 
-  esp8266Module.print("http://192.168.10.192:1880/hiveonly");
+  esp8266Module.print("http://beelog.dynu.net:1880/hiveonly");
 
   esp8266Module.print("?");
   esp8266Module.print("nodeId");
