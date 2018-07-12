@@ -1,6 +1,12 @@
+//GPRS Branch
+
 #include <Arduino.h>
 
 #define DEBUG
+
+// Change between Wifi and GPRS
+//#define GPRS
+#define WIFI
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
@@ -59,10 +65,21 @@ RandomNodeId beeNodeId;
 float iREF = 1.1;
 MesureVoltageInternal battery(iREF);
 
-#define numberOfSensors 3
+#define numberOfSensors 6
+
 
 // Structure of our payload coming from router and end devices
 struct Payload_t {
+  uint8_t id[4];
+  int16_t temp[6];
+  uint16_t bat;
+  uint16_t weight;
+  uint16_t humidity;
+  uint8_t alarm;
+};
+
+struct PayloadBuffer_t {
+  uint8_t containsData;
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
@@ -81,6 +98,10 @@ struct LocalData_t {
   uint16_t baseRain;
 };
 
+// Globalstruct array to collect data before Sending
+#define BUFFERSIZE 12
+PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
+
 // setup functions
 void initCoordinator();
 void startRFRadio(uint8_t channel, uint16_t nodeAddress);
@@ -88,10 +109,11 @@ void startCustomESP();
 
 // getting data
 void checkForNetworkData();
+void fillBufferArray(Payload_t *payloadAddress);
 void addLocalData(LocalData_t *localDataAddress);
 
 // posting data
-void postData(Payload_t *payloadAddress, LocalData_t *localDataAddress);
+void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress);
 
 void setup() {
   // put your setup code here, to run once:
@@ -105,14 +127,6 @@ Serial.println("Get BeeNodeId");
   Serial.println("Set voltage Ref");
   battery.setRefInternal();
   Serial.println("End Setup");
-}
-
-void loop() {
-  Serial.println("Start Loop");
-  checkForNetworkData();
-  Serial.println("Node going to sleep");
-  delay(500);
-  network.sleepNode(15, 0); // 15 cycles of 4 seconds
 }
 
 //// setup functions ///////////////////////////////////////////////////////////
@@ -163,6 +177,13 @@ void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
   Serial.println("Watchdog set");
 }
 
+void loop() {
+  Serial.println("Start Loop");
+  checkForNetworkData();
+  Serial.println("Node going to sleep");
+  delay(500);
+  network.sleepNode(15, 0); // 15 cycles of 4 seconds
+}
 
 //// Getting data //////////////////////////////////////////////////////////////
 void checkForNetworkData() {
@@ -211,9 +232,54 @@ void checkForNetworkData() {
     Serial.print(" Base lux: ");
     Serial.println(localData.baseLux, DEC);
 
+    // fillArray
+    fillBufferArray(&payload);
+
+
     // sendDataToESP();
-    postData(&payload, &localData);
+    #ifdef WIFI
+      postDataWifi(&payload, &localData);
+    #endif
+    #ifdef GPRS
+      postDataGPRS(&payload, &localData);
+    #endif
   }
+}
+
+void fillBufferArray(Payload_t *payloadAddress){
+  uint8_t bufferLocation = 0;
+  // get next free buffer location
+  for (int i = 0; i < BUFFERSIZE; i++){
+    if (payLoadBuffer[bufferLocation].containsData != 0)
+      bufferLocation++;
+  }
+  // copy temp array to next free buffer location
+  for (int i = 0; i<4;i++)
+    payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
+  for (int i = 0; i < numberOfSensors; i++)
+    payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
+  payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
+  payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
+
+  // temp code
+  Serial.println("buffer data");
+  Serial.print(" The node this is from: ");
+  Serial.print(" Node ID: ");
+  for (byte b : payLoadBuffer[bufferLocation].id)
+    Serial.print(b, HEX);
+  Serial.println();
+  for (int i = 0; i < numberOfSensors; i++) {
+    Serial.print(" Temperature");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    if (payLoadBuffer[bufferLocation].temp[i] == -12700)
+      Serial.println("-");
+    else
+      Serial.println(payLoadBuffer[bufferLocation].temp[i], DEC);
+  }
+  Serial.print(" Battery status: ");
+  Serial.println(payLoadBuffer[bufferLocation].bat, DEC);
+  //end temp code
 }
 
 void addLocalData(LocalData_t *localDataAddress) {
@@ -227,7 +293,7 @@ void addLocalData(LocalData_t *localDataAddress) {
 }
 
 //// Posting Data //////////////////////////////////////////////////////////////
-void postData(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
+void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
   // Post Hive Data
   // WIFI VERSION
 
