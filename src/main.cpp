@@ -1,12 +1,7 @@
 //GPRS Branch
-
 #include <Arduino.h>
 
 #define DEBUG
-
-// Change between Wifi and GPRS
-//#define GPRS
-#define WIFI
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
@@ -19,44 +14,79 @@
 #define DEBUG_PRINTLN(x)
 #endif
 
-// PINS
-//#define ledPin 6 // might change to buzzerPin
-#define radioPin1 7
-#define radioPin2 8
-#define softSerialRx A0
-#define softSerialTx A1
-#define resetPin A2
-//#define alarmPin 3
-#define seedRef A3
+// Change between Wifi and GPRS
+#define GPRS
+//#define WIFI
 
-// wifi / ...
+///////////////////////////////////////// HX711 ////////////////////////////////
+#define radioPin1 7 // RF24
+#define radioPin2 8 // RF24
+
+#define softSerialRx 3
+#define softSerialTx 4
+#define resetPin A2 // resetting esp module
+
+#define seedRef A3 // seed for random function
+
+///////////////////////////////////////// HX711 ////////////////////////////////
+#include "HX711-multi.h"
+
+///////////////////////////////////////// GPRS /////////////////////////////////
+#define TINY_GSM_MODEM_SIM800
+#include <TinyGsmClient.h>
+
+// Use Hardware Serial on Mega, Leonardo, Micro
+//#define SerialAT Serial1
+
+// or Software Serial on Uno, Nano
 #include <SoftwareSerial.h>
-SoftwareSerial esp8266Module(softSerialRx, softSerialTx); // RX, TX
-// radio
+SoftwareSerial SerialAT(softSerialRx, softSerialTx); // RX, TX
+
+// Your GPRS credentials //
+// Leave empty, if missing user or pass
+const char apn[]  = "telenetwap.be";
+const char user[] = "";
+const char pass[] = "";
+
+// Server details
+const char server[] = "beelog.dynu.net";
+const char resource[] = "/hiveonly/";
+
+
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+const int  port = 1880;
+
+///////////////////////////////////// WIFI /////////////////////////////////////
+#ifdef WIFI
+
+  #include <SoftwareSerial.h>
+  SoftwareSerial esp8266Module(softSerialRx, softSerialTx); // RX, TX
+
+#endif
+
+///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
 #include <RF24Network.h>
 #include <SPI.h>
-RF24 radio(7, 8);             // start RF24 communication layer
+RF24 radio(radioPin1, radioPin2);             // start RF24 communication layer
 RF24Network network(radio);   // start RF24 network layer
 const uint16_t thisNode = 00; // Coordinator address
 
-// humidity
+///////////////////////////////////// HUMIDITY /////////////////////////////////
 #include "SparkFunHTU21D.h"
 #include <Wire.h>
-HTU21D myHumidity;
+HTU21D myHumidity; // humidity + temperature
 
+///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
 #define EEPRomDeviceId 1 // 1 byte for #, 4 bytes for ID
 #define EEPRomOptions 6
 uint8_t nodeId[4];
 
-//LUX
-#include <Wire.h>
-#include <AS_BH1750.h>
-AS_BH1750 sensor;
+//////////////////////////////// own libraries /////////////////////////////////
 
-// own libraries //
 // NodeId
 #include "RandomNodeId.h"
 RandomNodeId beeNodeId;
@@ -65,9 +95,9 @@ RandomNodeId beeNodeId;
 float iREF = 1.1;
 MesureVoltageInternal battery(iREF);
 
-#define numberOfSensors 6
 
 
+///////////////////////////////////// STRUCTS & STRUCT ARAYS ///////////////////
 // Structure of our payload coming from router and end devices
 struct Payload_t {
   uint8_t id[4];
@@ -88,6 +118,7 @@ struct PayloadBuffer_t {
   uint8_t alarm;
 };
 
+//
 struct LocalData_t {
   uint8_t baseId[4];
   int16_t baseTemp;
@@ -102,10 +133,22 @@ struct LocalData_t {
 #define BUFFERSIZE 12
 PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 
+////////////////////////////////////////////////////////////////////////////////
+
+#define SerialMon Serial
+#define numberOfSensors 6
+uint8_t sendCounter = 0;
+
+////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
 void initCoordinator();
 void startRFRadio(uint8_t channel, uint16_t nodeAddress);
-void startCustomESP();
+/*#ifdef WIFI
+  void startCustomESP();
+#endif*/
+#ifdef GPRS
+  void initGprs();
+#endif
 
 // getting data
 void checkForNetworkData();
@@ -113,136 +156,155 @@ void fillBufferArray(Payload_t *payloadAddress);
 void addLocalData(LocalData_t *localDataAddress);
 
 // posting data
-void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress);
+void sendArrayContent();
+void sendGprsData();
+/*#ifdef WIFI
+  void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress);
+#endif*/
 
 void setup() {
   // put your setup code here, to run once:
+  delay(5000);
   initCoordinator();
-  startCustomESP();
+  /*#ifdef WIFI
+    startCustomESP();
+  #endif*/
   startRFRadio(90, thisNode);
-  Serial.println("Started RF Radio");
+  SerialMon.println("Started RF Radio");
   delay(10000); // delay for reprogramming purposses
-Serial.println("Get BeeNodeId");
+  SerialMon.println("Get BeeNodeId");
   beeNodeId.getId(nodeId); // send array to fill as parameter
-  Serial.println("Set voltage Ref");
+  SerialMon.println("Set voltage Ref");
   battery.setRefInternal();
-  Serial.println("End Setup");
+  SerialMon.println("End Setup");
 }
 
 //// setup functions ///////////////////////////////////////////////////////////
 void initCoordinator(){
-  Serial.begin(9600); // Serial Start
-  Serial.println("BeeNode Coordinator v0.1");
+  SerialMon.begin(9600); // SerialMon Start
+  delay(100);
+  SerialMon.println("Serial Started");
+  // Set GSM module baud rate
+  SerialAT.begin(9600);
+  delay(3000);
+  SerialMon.println("BeeNode Coordinator v0.1");
   battery.setRefInternal(); // Set voltage reference
   beeNodeId.getId(nodeId); // send array to fill as parameter
   myHumidity.begin(); // start humidity sensor
-  // for normal sensor resolution (1 lx resolution, 0-65535 lx, 120ms, no PowerDown) use: sensor.begin(RESOLUTION_NORMAL, false);
-  // Initialize sensor. if sensor is not present, false is returned
-  if(sensor.begin()) {
-    Serial.println("Sensor initialized");
-  }
-  else {
-    Serial.println("Sensor not present");
-  }
-  Serial.print("Coordinator Id: CO");
+
+  SerialMon.print("Coordinator Id: CO");
   for (byte b : nodeId)
-    Serial.print(b, HEX);
-  Serial.println();
+    SerialMon.print(b, HEX);
+  SerialMon.println();
 }
 
+/*#ifdef WIFI
 void startCustomESP() {
   // esp8266Module
   esp8266Module.begin(9600);
   delay(500); //------------
-  Serial.println("Soft Serial started at 9600");
+  SerialMon.println("Soft Serial started at 9600");
   pinMode(resetPin, OUTPUT);
   digitalWrite(resetPin, HIGH);
 }
+#endif*/
+
+#ifdef GPRS
+void initGprs(){
+  SerialMon.println(F("Initializing modem..."));
+  modem.restart();
+
+  String modemInfo = modem.getModemInfo();
+  SerialMon.print(F("Modem: "));
+  SerialMon.println(modemInfo);
+}
+#endif
 
 void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
-  Serial.print("Starting rf radio. ");
-  Serial.print("Channel: ");
-  Serial.print(channel);
-  Serial.print(", NodeAddress:  ");
-  Serial.println(nodeAddress);
+  SerialMon.print("Starting rf radio. ");
+  SerialMon.print("Channel: ");
+  SerialMon.print(channel);
+  SerialMon.print(", NodeAddress:  ");
+  SerialMon.println(nodeAddress);
 
   SPI.begin();
-  Serial.println("SPI started");
+  SerialMon.println("SPI started");
   radio.begin();
-  Serial.println("Radio started");
+  SerialMon.println("Radio started");
   // radio.setPALevel(HIGH);
   network.begin(channel, nodeAddress);
-  Serial.println("Network started");
+  SerialMon.println("Network started");
   network.setup_watchdog(9); // Sets the WDT to trigger every second
-  Serial.println("Watchdog set");
+  SerialMon.println("Watchdog set");
 }
 
 void loop() {
-  Serial.println("Start Loop");
+  SerialMon.println("Start Loop");
   checkForNetworkData();
-  Serial.println("Node going to sleep");
+  sendCounter++;
+  if (sendCounter == 15)
+    sendArrayContent();
+  SerialMon.println("Node going to sleep");
   delay(500);
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
 void checkForNetworkData() {
-  // check network communication regularly
-  network.update();
-
+  network.update(); // check network communication regularly
   RF24NetworkHeader header; // create header variable
   Payload_t payload;        // create payload variable
-  // Any data on the network ready to read
-  while (network.available()) {
-    // If so, grab it and print it out
-    network.read(header, &payload, sizeof(payload));
 
+  while (network.available()) { // Any data on the network ready to read
+        network.read(header, &payload, sizeof(payload)); // If so, grab it and print it out
     // Add coordinator Data
-    LocalData_t localData;
-    addLocalData(&localData);
+    //LocalData_t localData;
+    //addLocalData(&localData);
 
     // Display Node Data
-    Serial.println("REMOTE DATA");
-    Serial.print(" The node this is from: ");
-    Serial.println(header.from_node);
-    Serial.print(" Node ID: ");
+    SerialMon.println(F("REMOTE DATA"));
+    SerialMon.print(" The node this is from: ");
+    SerialMon.println(header.from_node);
+    SerialMon.print(" Node ID: ");
     for (byte b : payload.id)
-      Serial.print(b, HEX);
-    Serial.println();
+      SerialMon.print(b, HEX);
+    SerialMon.println();
     for (int i = 0; i < numberOfSensors; i++) {
-      Serial.print(" Temperature");
-      Serial.print(i + 1);
-      Serial.print(": ");
+      SerialMon.print(" Temperature");
+      SerialMon.print(i + 1);
+      SerialMon.print(": ");
       if (payload.temp[i] == -12700)
-        Serial.println("-");
+        SerialMon.println("-");
       else
-        Serial.println(payload.temp[i], DEC);
+        SerialMon.println(payload.temp[i], DEC);
     }
-    Serial.print(" Battery status: ");
-    Serial.println(payload.bat, DEC);
+    SerialMon.print(" Battery status: ");
+    SerialMon.println(payload.bat, DEC);
 
     // Display Local Data
-    Serial.println("LOCAL DATA");
-    Serial.print(" Base bat: ");
-    Serial.println(localData.baseBat, DEC);
-    Serial.print(" Base temp: ");
-    Serial.println(float(localData.baseTemp)/100, DEC);
-    Serial.print(" Base hum: ");
-    Serial.println(localData.baseHum, DEC);
-    Serial.print(" Base lux: ");
-    Serial.println(localData.baseLux, DEC);
+    /*
+    SerialMon.println("LOCAL DATA");
+    SerialMon.print(" Base bat: ");
+    SerialMon.println(localData.baseBat, DEC);
+    SerialMon.print(" Base temp: ");
+    SerialMon.println(float(localData.baseTemp)/100, DEC);
+    SerialMon.print(" Base hum: ");
+    SerialMon.println(localData.baseHum, DEC);
+    SerialMon.print(" Base lux: ");
+    SerialMon.println(localData.baseLux, DEC);
+    */
 
-    // fillArray
-    fillBufferArray(&payload);
+    fillBufferArray(&payload); // fill buffer array
 
 
-    // sendDataToESP();
+    /*
     #ifdef WIFI
       postDataWifi(&payload, &localData);
     #endif
     #ifdef GPRS
       postDataGPRS(&payload, &localData);
     #endif
+    */
   }
 }
 
@@ -253,6 +315,9 @@ void fillBufferArray(Payload_t *payloadAddress){
     if (payLoadBuffer[bufferLocation].containsData != 0)
       bufferLocation++;
   }
+  SerialMon.print("Filling array position");
+  SerialMon.println(bufferLocation);
+  payLoadBuffer[bufferLocation].containsData = 1;
   // copy temp array to next free buffer location
   for (int i = 0; i<4;i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
@@ -262,24 +327,29 @@ void fillBufferArray(Payload_t *payloadAddress){
   payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
 
   // temp code
-  Serial.println("buffer data");
-  Serial.print(" The node this is from: ");
-  Serial.print(" Node ID: ");
+  SerialMon.println("buffer data");
+  SerialMon.print(" The node this is from: ");
+  SerialMon.print(" Node ID: ");
   for (byte b : payLoadBuffer[bufferLocation].id)
-    Serial.print(b, HEX);
-  Serial.println();
+    SerialMon.print(b, HEX);
+  SerialMon.println();
   for (int i = 0; i < numberOfSensors; i++) {
-    Serial.print(" Temperature");
-    Serial.print(i + 1);
-    Serial.print(": ");
+    SerialMon.print(" Temperature");
+    SerialMon.print(i + 1);
+    SerialMon.print(": ");
     if (payLoadBuffer[bufferLocation].temp[i] == -12700)
-      Serial.println("-");
+      SerialMon.println("-");
     else
-      Serial.println(payLoadBuffer[bufferLocation].temp[i], DEC);
+      SerialMon.println(payLoadBuffer[bufferLocation].temp[i], DEC);
   }
-  Serial.print(" Battery status: ");
-  Serial.println(payLoadBuffer[bufferLocation].bat, DEC);
+  SerialMon.print(" Battery status: ");
+  SerialMon.println(payLoadBuffer[bufferLocation].bat, DEC);
   //end temp code
+}
+
+void sendArrayContent(){
+  //we check each array position, get the variables and send them to gprs functions
+  // or should we send them from here?
 }
 
 void addLocalData(LocalData_t *localDataAddress) {
@@ -288,24 +358,26 @@ void addLocalData(LocalData_t *localDataAddress) {
   localDataAddress->baseTemp = myHumidity.readTemperature()*100;
   localDataAddress->baseHum = myHumidity.readHumidity();
   localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
-  localDataAddress->baseLux = sensor.readLightLevel();
+  //localDataAddress->baseLux = sensor.readLightLevel();
 //  localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
+
 //// Posting Data //////////////////////////////////////////////////////////////
+/*#ifdef WIFI
 void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
   // Post Hive Data
   // WIFI VERSION
 
-  Serial.println("Resetting ESP");
+  SerialMon.println("Resetting ESP");
   digitalWrite(resetPin, LOW);
   delay(1000);
   digitalWrite(resetPin, HIGH);
-  Serial.println("Waiting for ESP to start");
+  SerialMon.println("Waiting for ESP to start");
   delay(3000);
-  Serial.println("Sending data to ESP");
+  SerialMon.println("Sending data to ESP");
 
-  Serial.println("Posting Data");
+  SerialMon.println("Posting Data");
 
   esp8266Module.print("http://beelog.dynu.net:1880/hiveonly");
 
@@ -368,5 +440,65 @@ void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
 
   delay(1000);
 
-  Serial.println("ESP going to sleep");
+  SerialMon.println("ESP going to sleep");
+}
+#endif*/
+
+void sendGprsData(){
+  SerialMon.print(F("Waiting for network..."));
+  if (!modem.waitForNetwork()) {
+    SerialMon.println(" fail");
+    delay(10000);
+    return;
+  }
+  SerialMon.println(" OK");
+
+  SerialMon.print(F("Connecting to "));
+  SerialMon.print(apn);
+  if (!modem.gprsConnect(apn, user, pass)) {
+    SerialMon.println(" fail");
+    delay(10000);
+    return;
+  }
+  SerialMon.println(" OK");
+
+  SerialMon.print(F("Connecting to "));
+  SerialMon.print(server);
+  if (!client.connect(server, port)) {
+    SerialMon.println(" fail");
+    delay(10000);
+    return;
+  }
+  SerialMon.println(" OK");
+
+  // Make a HTTP GET request:
+  client.print(String("GET ") + resource + " HTTP/1.0\r\n");
+  client.print(String("Host: ") + server + "\r\n");
+  client.print("Connection: close\r\n\r\n");
+
+  unsigned long timeout = millis();
+  while (client.connected() && millis() - timeout < 10000L) {
+    // Print available data
+    while (client.available()) {
+      char c = client.read();
+      SerialMon.print(c);
+      timeout = millis();
+      if(c == '#')
+        SerialMon.print("!");
+    }
+  }
+  SerialMon.println();
+
+  // Shutdown
+
+  client.stop();
+  SerialMon.println(F("Server disconnected"));
+
+  modem.gprsDisconnect();
+  SerialMon.println(F("GPRS disconnected"));
+
+  // Do nothing forevermore
+  while (true) {
+    delay(1000);
+  }
 }
