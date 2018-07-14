@@ -3,6 +3,7 @@
 
 #define DEBUG
 
+/*
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
 #define DEBUG_PRINTDEC(x) Serial.print(x, DEC)
@@ -13,6 +14,7 @@
 #define DEBUG_PRINTDEC(x)
 #define DEBUG_PRINTLN(x)
 #endif
+*/
 
 // Change between Wifi and GPRS
 #define GPRS
@@ -32,20 +34,50 @@
 #include "HX711-multi.h"
 
 ///////////////////////////////////////// GPRS /////////////////////////////////
+/**************************************************************
+ *
+ * This sketch connects to a website and downloads a page.
+ * It can be used to perform HTTP/RESTful API calls.
+ *
+ * TinyGSM Getting Started guide:
+ *   http://tiny.cc/tiny-gsm-readme
+ *
+ **************************************************************/
+
+// Select your modem:
 #define TINY_GSM_MODEM_SIM800
+// #define TINY_GSM_MODEM_SIM808
+// #define TINY_GSM_MODEM_SIM900
+// #define TINY_GSM_MODEM_UBLOX
+// #define TINY_GSM_MODEM_BG96
+// #define TINY_GSM_MODEM_A6
+// #define TINY_GSM_MODEM_A7
+// #define TINY_GSM_MODEM_M590
+// #define TINY_GSM_MODEM_ESP8266
+
+// Increase RX buffer if needed
+//#define TINY_GSM_RX_BUFFER 512
+
 #include <TinyGsmClient.h>
 
+// Uncomment this if you want to see all AT commands
+//#define DUMP_AT_COMMANDS
 
-//#define TINY_GSM_RX_BUFFER 512
+// Uncomment this if you want to use SSL
+//#define USE_SSL
+
+// Set serial for debug console (to the Serial Monitor, default speed 115200)
+#define SerialMon Serial
 
 // Use Hardware Serial on Mega, Leonardo, Micro
 //#define SerialAT Serial1
 
 // or Software Serial on Uno, Nano
 #include <SoftwareSerial.h>
-SoftwareSerial SerialAT(softSerialRx, softSerialTx); // RX, TX
+SoftwareSerial SerialAT(3, 4); // RX, TX
 
-// Your GPRS credentials //
+
+// Your GPRS credentials
 // Leave empty, if missing user or pass
 const char apn[]  = "telenetwap.be";
 const char user[] = "";
@@ -53,12 +85,24 @@ const char pass[] = "";
 
 // Server details
 const char server[] = "beelog.dynu.net";
-const char resource[] = "/hiveonly/";
+const char resource[] = "/hiveonly?d=1";
 
+#ifdef DUMP_AT_COMMANDS
+  #include <StreamDebugger.h>
+  StreamDebugger debugger(SerialAT, SerialMon);
+  TinyGsm modem(debugger);
+#else
+  TinyGsm modem(SerialAT);
+#endif
 
-TinyGsm modem(SerialAT);
-TinyGsmClient client(modem);
-const int  port = 1880;
+#ifdef USE_SSL
+  TinyGsmClientSecure client(modem);
+  const int  port = 443;
+#else
+  TinyGsmClient client(modem);
+  const int  port = 1880;
+#endif
+
 
 ///////////////////////////////////// WIFI /////////////////////////////////////
 /*#ifdef WIFI
@@ -144,7 +188,7 @@ uint8_t sendCounter = 0;
 
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
-void initCoordinator();
+//void initCoordinator();
 void startRFRadio(uint8_t channel, uint16_t nodeAddress);
 /*#ifdef WIFI
   void startCustomESP();
@@ -162,7 +206,8 @@ void addScaleData();
 // posting data
 void sendArrayContent();
 void sendScaleData();
-void sendGprsData();
+
+void sendGprsData(uint8_t gprsMode);
 
 /*#ifdef WIFI
   void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress);
@@ -170,31 +215,15 @@ void sendGprsData();
 
 void setup() {
   // put your setup code here, to run once:
-  delay(5000);
-  initCoordinator();
-  /*#ifdef WIFI
-    startCustomESP();
-  #endif*/
-  startRFRadio(90, thisNode);
-  SerialMon.println("Started RF Radio");
-  delay(10000); // delay for reprogramming purposses
-  SerialMon.println("Get BeeNodeId");
-  beeNodeId.getId(nodeId); // send array to fill as parameter
-  SerialMon.println("Set voltage Ref");
-  battery.setRefInternal();
-  SerialMon.println("End Setup");
-}
-
-//// setup functions ///////////////////////////////////////////////////////////
-void initCoordinator(){
+  delay(2000);
   SerialMon.begin(9600); // SerialMon Start
-  delay(100);
-  SerialMon.println("Serial Started");
+  delay(1000);
+  SerialMon.println("SerialMon Started");
   // Set GSM module baud rate
   SerialAT.begin(9600);
-  delay(3000);
-
-sendGprsData();
+  delay(1000);
+  SerialMon.println("SerialAT Started");
+  //initCoordinator();
 
   SerialMon.println("BeeNode Coordinator v0.1");
   battery.setRefInternal(); // Set voltage reference
@@ -205,7 +234,35 @@ sendGprsData();
   for (byte b : nodeId)
     SerialMon.print(b, HEX);
   SerialMon.println();
+
+  SerialMon.println("First GPRS POST");
+  sendGprsData(1);
+  /*#ifdef WIFI
+    startCustomESP();
+  #endif*/
+
+  startRFRadio(90, thisNode);
+  SerialMon.println("Started RF Radio");
+  SerialMon.println("Get BeeNodeId");
+  beeNodeId.getId(nodeId); // send array to fill as parameter
+  SerialMon.println("Set voltage Ref");
+  battery.setRefInternal();
+  SerialMon.println("End Setup");
+
 }
+
+//// setup functions ///////////////////////////////////////////////////////////
+/*void initCoordinator(){
+  SerialMon.println("BeeNode Coordinator v0.1");
+  battery.setRefInternal(); // Set voltage reference
+  beeNodeId.getId(nodeId); // send array to fill as parameter
+  myHumidity.begin(); // start humidity sensor
+
+  SerialMon.print("Coordinator Id: CO");
+  for (byte b : nodeId)
+    SerialMon.print(b, HEX);
+  SerialMon.println();
+}*/
 
 /*#ifdef WIFI
 void startCustomESP() {
@@ -222,7 +279,6 @@ void startCustomESP() {
 void initGprs(){
   SerialMon.println(F("Initializing modem..."));
   modem.restart();
-
   String modemInfo = modem.getModemInfo();
   SerialMon.print(F("Modem: "));
   SerialMon.println(modemInfo);
@@ -247,8 +303,11 @@ void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
   SerialMon.println("Watchdog set");
 }
 
+
+
 void loop() {
   SerialMon.println("Start Loop");
+  sendGprsData(2);
   checkForNetworkData();
   sendCounter++;
   if (sendCounter == 15){
@@ -260,6 +319,7 @@ SerialMon.println("GPRS----------------");
   SerialMon.println("Node going to sleep");
   delay(500);
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
+  */
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
@@ -464,21 +524,25 @@ void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
 }
 #endif*/
 
-void sendGprsData(){
+void sendGprsData(uint8_t gprsMode){
 
+  //initGprs();
+  SerialMon.println(F("SEND DATA THROUGH GPRS"));
+  SerialMon.print(F("Mode:"));
+  SerialMon.println(gprsMode);
   // Restart takes quite some time
   // To skip it, call init() instead of restart()
-  SerialMon.println(F("Initializing modem..."));
+  SerialMon.println(F("   Initializing modem..."));
   modem.restart();
 delay(3000);
   String modemInfo = modem.getModemInfo();
 delay(1000);
-  SerialMon.print(F("Modem: "));
+  SerialMon.print(F("   Modem: "));
   SerialMon.println(modemInfo);
 
   //////////////////////////////////////////////
 
-  SerialMon.print(F("Waiting for network..."));
+  SerialMon.print(F("   Waiting for network..."));
   if (!modem.waitForNetwork()) {
     SerialMon.println(" fail");
     delay(10000);
@@ -486,7 +550,7 @@ delay(1000);
   }
   SerialMon.println(" OK");
 
-  SerialMon.print(F("Connecting to "));
+  SerialMon.print(F("   Connecting to "));
   SerialMon.print(apn);
   if (!modem.gprsConnect(apn, user, pass)) {
     SerialMon.println(" fail");
@@ -495,7 +559,7 @@ delay(1000);
   }
   SerialMon.println(" OK");
 
-  SerialMon.print(F("Connecting to "));
+  SerialMon.print(F("   Connecting to "));
   SerialMon.print(server);
   if (!client.connect(server, port)) {
     SerialMon.println(" fail");
@@ -504,8 +568,23 @@ delay(1000);
   }
   SerialMon.println(" OK");
 
+
+
   // Make a HTTP GET request:
-  client.print(String("GET ") + resource + " HTTP/1.0\r\n");
+
+
+  switch (gprsMode) {
+  case 1:
+    client.print(String("GET ") + "/register?coordinatorId=");
+    for (byte b : nodeId)
+      client.print(b, HEX);
+    client.print(" HTTP/1.0\r\n");
+    break;
+  case 2:
+    client.print(String("GET ") + resource + "&e=2" + " HTTP/1.0\r\n");
+    break;
+  }
+
   client.print(String("Host: ") + server + "\r\n");
   client.print("Connection: close\r\n\r\n");
 
@@ -522,16 +601,11 @@ delay(1000);
   }
   SerialMon.println();
 
-  // Shutdown
-
   client.stop();
-  SerialMon.println(F("Server disconnected"));
+  SerialMon.println(F("   Server disconnected"));
 
   modem.gprsDisconnect();
-  SerialMon.println(F("GPRS disconnected"));
+  SerialMon.println(F("   GPRS disconnected"));
 
-  // Do nothing forevermore
-  while (true) {
-    delay(1000);
-  }
+SerialMon.println(F("End GPRS"));
 }
