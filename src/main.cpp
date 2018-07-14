@@ -35,6 +35,9 @@
 #define TINY_GSM_MODEM_SIM800
 #include <TinyGsmClient.h>
 
+
+//#define TINY_GSM_RX_BUFFER 512
+
 // Use Hardware Serial on Mega, Leonardo, Micro
 //#define SerialAT Serial1
 
@@ -58,12 +61,12 @@ TinyGsmClient client(modem);
 const int  port = 1880;
 
 ///////////////////////////////////// WIFI /////////////////////////////////////
-#ifdef WIFI
+/*#ifdef WIFI
 
   #include <SoftwareSerial.h>
   SoftwareSerial esp8266Module(softSerialRx, softSerialTx); // RX, TX
 
-#endif
+#endif*/
 
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
@@ -154,10 +157,13 @@ void startRFRadio(uint8_t channel, uint16_t nodeAddress);
 void checkForNetworkData();
 void fillBufferArray(Payload_t *payloadAddress);
 void addLocalData(LocalData_t *localDataAddress);
+void addScaleData();
 
 // posting data
 void sendArrayContent();
+void sendScaleData();
 void sendGprsData();
+
 /*#ifdef WIFI
   void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress);
 #endif*/
@@ -187,6 +193,9 @@ void initCoordinator(){
   // Set GSM module baud rate
   SerialAT.begin(9600);
   delay(3000);
+
+sendGprsData();
+
   SerialMon.println("BeeNode Coordinator v0.1");
   battery.setRefInternal(); // Set voltage reference
   beeNodeId.getId(nodeId); // send array to fill as parameter
@@ -242,8 +251,12 @@ void loop() {
   SerialMon.println("Start Loop");
   checkForNetworkData();
   sendCounter++;
-  if (sendCounter == 15)
+  if (sendCounter == 15){
     sendArrayContent();
+    sendScaleData();
+  }
+SerialMon.println("GPRS----------------");
+  //sendGprsData();
   SerialMon.println("Node going to sleep");
   delay(500);
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
@@ -362,6 +375,13 @@ void addLocalData(LocalData_t *localDataAddress) {
 //  localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
+void sendScaleData(){
+
+}
+void addScaleData(){
+  //read scales and add data to
+}
+
 
 //// Posting Data //////////////////////////////////////////////////////////////
 /*#ifdef WIFI
@@ -445,6 +465,19 @@ void postDataWifi(Payload_t *payloadAddress, LocalData_t *localDataAddress) {
 #endif*/
 
 void sendGprsData(){
+
+  // Restart takes quite some time
+  // To skip it, call init() instead of restart()
+  SerialMon.println(F("Initializing modem..."));
+  modem.restart();
+delay(3000);
+  String modemInfo = modem.getModemInfo();
+delay(1000);
+  SerialMon.print(F("Modem: "));
+  SerialMon.println(modemInfo);
+
+  //////////////////////////////////////////////
+
   SerialMon.print(F("Waiting for network..."));
   if (!modem.waitForNetwork()) {
     SerialMon.println(" fail");
