@@ -28,6 +28,10 @@
 #define softSerialTx 4
 #define resetPin A2 // resetting esp module
 
+#define MISO 11
+#define MOSI 12
+#define CLK 13
+
 #define seedRef A3 // seed for random function
 
 ///////////////////////////////////////// HX711 ////////////////////////////////
@@ -85,7 +89,7 @@ const char pass[] = "";
 
 // Server details
 const char server[] = "beelog.dynu.net";
-const char resource[] = "/hiveonly?d=1";
+const char resource[] = "/hiveonly";
 
 #ifdef DUMP_AT_COMMANDS
   #include <StreamDebugger.h>
@@ -308,18 +312,12 @@ void startRFRadio(uint8_t channel, uint16_t nodeAddress) {
 void loop() {
   SerialMon.println("Start Loop");
   sendGprsData(2);
+  delay(1000);
   checkForNetworkData();
-  sendCounter++;
-  if (sendCounter == 15){
-    sendArrayContent();
-    sendScaleData();
-  }
-SerialMon.println("GPRS----------------");
-  //sendGprsData();
   SerialMon.println("Node going to sleep");
   delay(500);
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
-  */
+
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
@@ -367,7 +365,7 @@ void checkForNetworkData() {
     SerialMon.println(localData.baseLux, DEC);
     */
 
-    fillBufferArray(&payload); // fill buffer array
+    //fillBufferArray(&payload); // fill buffer array
 
 
     /*
@@ -568,23 +566,7 @@ delay(1000);
   }
   SerialMon.println(" OK");
 
-
-
-  // Make a HTTP GET request:
-
-
-  switch (gprsMode) {
-  case 1:
-    client.print(String("GET ") + "/register?coordinatorId=");
-    for (byte b : nodeId)
-      client.print(b, HEX);
-    client.print(" HTTP/1.0\r\n");
-    break;
-  case 2:
-    client.print(String("GET ") + resource + "&e=2" + " HTTP/1.0\r\n");
-    break;
-  }
-
+  client.print(String("GET ") + resource + "?e=2" + " HTTP/1.0\r\n");
   client.print(String("Host: ") + server + "\r\n");
   client.print("Connection: close\r\n\r\n");
 
@@ -596,7 +578,7 @@ delay(1000);
       SerialMon.print(c);
       timeout = millis();
       if(c == '#')
-        SerialMon.print("!");
+        SerialMon.print("   - Send OK");
     }
   }
   SerialMon.println();
