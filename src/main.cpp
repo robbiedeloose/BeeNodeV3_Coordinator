@@ -167,11 +167,14 @@ void setup() {
   myHumidity.begin(); // start humidity sensor
 
   // register ccordinator to NodeRed
+  SerialMon.println("Resetting GPRS");
+  delay(1000);
+  initGprs();
   SerialMon.println("Register Coordinator to NodeRed");
+  delay(1000);
   sendGprsData(1);
 
-  // start GPRS & nRF24l radio
-  initGprs();
+  // start nRF24l radio
   initRFRadio(90, thisNode);
   SerialMon.println("initialisation complete");
   SerialMon.println("--------------------------------------------------------");
@@ -179,6 +182,7 @@ void setup() {
 
 void initGprs(){
   SerialMon.println(F("Initializing modem..."));
+  delay(1000);
   modem.restart();
   String modemInfo = modem.getModemInfo();
   SerialMon.print(F("   Modem: "));
@@ -247,7 +251,7 @@ void checkForNetworkData() {
     SerialMon.print(" Battery status: ");
     SerialMon.println(payload.bat, DEC);
 
-    fillBufferArray(&payload); // fill buffer array
+    //fillBufferArray(&payload); // fill buffer array
   }
 }
 
@@ -322,6 +326,7 @@ void sendGprsData(uint8_t gprsMode){
   // Restart takes quite some time
   // To skip it, call init() instead of restart()
   SerialMon.println(F("   Initializing modem..."));
+  delay(1000);
   modem.restart();
 delay(3000);
   String modemInfo = modem.getModemInfo();
