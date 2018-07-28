@@ -1,18 +1,14 @@
 #include <Arduino.h>
 
-#define DEBUG
-
-// Change between Wifi and GPRS
-#define GPRS
-//#define WIFI
-
-///////////////////////////////////////// HX711 ////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 #define radioPin1 7 // RF24
 #define radioPin2 8 // RF24
 
-#define softSerialRx 3
-#define softSerialTx 4
-#define resetPin A2 // resetting esp module
+#define softSerialAtRx 3
+#define softSerialAtTx 4
+#define resetPin A2 // resetting esp/gprs module
+#define softSerialScaleRx 9
+#define softSerialScaleTx 10
 
 #define MISO 11
 #define MOSI 12
@@ -20,9 +16,11 @@
 
 #define seedRef A3 // seed for random function
 
-///////////////////////////////////////// HX711 ////////////////////////////////
-#include "HX711-multi.h"
-
+////////////////////////////////////////// Serials /////////////////////////////
+#define SerialMon Serial
+#include <SoftwareSerial.h>
+SoftwareSerial SerialAT(softSerialAtRx, softSerialAtTx);
+SoftwareSerial SerialScale(softSerialScaleRx, softSerialScaleTx);
 ///////////////////////////////////////// GPRS /////////////////////////////////
 // Select your modem:
 #define TINY_GSM_MODEM_SIM800
@@ -31,14 +29,6 @@
 #include <TinyGsmClient.h>
 // Uncomment this if you want to see all AT commands
 //#define DUMP_AT_COMMANDS
-// Uncomment this if you want to use SSL
-//#define USE_SSL
-
-// Use Hardware Serial on Mega, Leonardo, Micro
-//#define SerialAT Serial1
-// or Software Serial on Uno, Nano
-#include <SoftwareSerial.h>
-SoftwareSerial SerialAT(3, 4); // RX, TX
 
 // Your GPRS credentials
 // Leave empty, if missing user or pass
@@ -47,7 +37,9 @@ const char user[] = "";
 const char pass[] = "";
 // Server details
 const char server[] = "beelog.dynu.net";
+const char server2[] = "beelog2.dynu.net";
 const char resource[] = "/hiveonly";
+boolean GprsAvtice = false;
 
 #ifdef DUMP_AT_COMMANDS
   #include <StreamDebugger.h>
@@ -69,25 +61,26 @@ const char resource[] = "/hiveonly";
 #include <RF24.h>
 #include <RF24Network.h>
 #include <SPI.h>
-RF24 radio(radioPin1, radioPin2);             // start RF24 communication layer
-RF24Network network(radio);   // start RF24 network layer
-const uint16_t thisNode = 00; // Coordinator address
+RF24 radio(radioPin1, radioPin2); // start RF24 communication layer
+RF24Network network(radio);       // start RF24 network layer
+const uint16_t thisNode = 00;     // Coordinator address
 ///////////////////////////////////// HUMIDITY /////////////////////////////////
 #include "SparkFunHTU21D.h"
 #include <Wire.h>
-HTU21D myHumidity; // humidity + temperature
+HTU21D myHumidity;           // humidity + temperature
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
 #define EEPRomDeviceId 1 // 1 byte for #, 4 bytes for ID
 #define EEPRomOptions 6
-uint8_t nodeId[4];
+uint8_t coordId[4];
 //////////////////////////////// own libraries /////////////////////////////////
 #include "RandomNodeId.h" // NodeId
 RandomNodeId beeNodeId;
 #include "MesureVoltageInternal.h" // Internal Voltage measurement
 float iREF = 1.1;
 MesureVoltageInternal battery(iREF);
+
 ///////////////////////////////////// STRUCTS & STRUCT ARAYS ///////////////////
 // Structure of our payload coming from router and end devices
 struct Payload_t {
@@ -120,103 +113,97 @@ struct LocalData_t {
 };
 
 // Globalstruct array to collect data before Sending
-#define BUFFERSIZE 12
+#define BUFFERSIZE 6
 PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
-#define SerialMon Serial
 #define numberOfSensors 6
 uint8_t sendCounter = 0;
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
-void initGprs();
 // getting data
 void checkForNetworkData();
 void fillBufferArray(Payload_t *payloadAddress);
 void addLocalData(LocalData_t *localDataAddress);
 void addScaleData();
+// gprs functions
+void gprsInit();
+void gprsConnectNetwork();
+void gprsConnectHost();
+void gprsSendHiveData();
+void gprsRegisterNode();
+void gprsDisconnectHost();
+void gprsEnd();
+void getGprsResponse();
 // posting data
 void sendArrayContent();
-void sendScaleData();
-void sendGprsData(uint8_t gprsMode);
+void gprsSendScaleData();
 ////////////////////////////////////////////////////////////////////////////////
 
+void clearPayloadBuffer(){
+  for (int i = 0; i < BUFFERSIZE; i++){
+    payLoadBuffer[i].containsData = 0;
+  }
+}
+
 /////////////// SETUP //////////////////////////////////////////////////////////
-void setup() {
-  // put your setup code here, to run once:
-  delay(2000);
+void setup() { //clean
   SerialMon.begin(9600); // SerialMon Start
+  SerialAT.begin(9600); // Serial port for GPRS
+  //SerialScale.begin(38400); //Serial port for scale module
   delay(1000);
-  SerialMon.println("Initialising...");
-  // Set GSM module baud rate - make sure to put mon baud rate at same level
-  SerialAT.begin(9600);
-  delay(1000);
-  SerialMon.println("SerialAT Started");
   // print some coordinator node information
   SerialMon.println("BeeNode Coordinator v0.1");
-  beeNodeId.getId(nodeId); // send array to fill as parameter
+  beeNodeId.getId(coordId); // send array to fill as parameter
   SerialMon.print("Coordinator Id: CO");
-  for (byte b : nodeId)
+  for (byte b : coordId)
     SerialMon.print(b, HEX);
   SerialMon.println();
-
-  // initiate sensors
-  SerialMon.println("Set voltage Ref");
+  clearPayloadBuffer();   // clear payloadbuffer
   battery.setRefInternal(); // Set voltage reference
-  SerialMon.println("Start HTU21D");
   myHumidity.begin(); // start humidity sensor
+  initRFRadio(90, thisNode); // start nRF24l radio
 
-  // register ccordinator to NodeRed
-  SerialMon.println("Resetting GPRS");
-  delay(1000);
-  initGprs();
   SerialMon.println("Register Coordinator to NodeRed");
   delay(1000);
-  sendGprsData(1);
+  gprsInit();
+  gprsConnectNetwork();
+  gprsRegisterNode();
+  gprsEnd();
 
-  // start nRF24l radio
-  initRFRadio(90, thisNode);
   SerialMon.println("initialisation complete");
-  SerialMon.println("--------------------------------------------------------");
 }
 
-void initGprs(){
-  SerialMon.println(F("Initializing modem..."));
-  delay(1000);
-  modem.restart();
-  String modemInfo = modem.getModemInfo();
-  SerialMon.print(F("   Modem: "));
-  SerialMon.println(modemInfo);
-}
-
-void initRFRadio(uint8_t channel, uint16_t nodeAddress) {
-  SerialMon.print("Starting rf radio. ");
-  SerialMon.print("Channel: ");
+void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
+  SerialMon.print("Rf Channel: ");
   SerialMon.print(channel);
   SerialMon.print(", NodeAddress:  ");
   SerialMon.println(nodeAddress);
 
   SPI.begin();
-  SerialMon.println("   SPI started");
   radio.begin();
-  SerialMon.println("   Radio started");
-  // radio.setPALevel(HIGH);
+  //radio.setPALevel(HIGH);
   network.begin(channel, nodeAddress);
-  SerialMon.println("   Network started");
   network.setup_watchdog(9); // Sets the WDT to trigger every second
-  SerialMon.println(   "Watchdog set");
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
-void loop() {
+void loop() { //clean
+  SerialMon.println();
   SerialMon.println("Start Loop");
   checkForNetworkData(); // network data available?
 
   // If a given time threshold is breached, read the buffer array and send the data over gprs
   // Timer yet to be implemented. RTC/counter..
   // Send scale data
-	sendArrayContent();
-	sendScaleData();
+  if (payLoadBuffer[1].containsData == 1){
+    Serial.println("sending data");
+    gprsInit();
+    gprsConnectNetwork();
+    gprsSendHiveData();
+    //gprsSendScaleData();
+    gprsEnd();
+  }
 
   SerialMon.println("Node going to sleep");
   delay(500); // give serial time to complete before node goes to sleep
@@ -232,14 +219,13 @@ void checkForNetworkData() {
   while (network.available()) { // Any data on the network ready to read
     network.read(header, &payload, sizeof(payload)); // If so, grab it and print it out
     // Display Node Data
-    SerialMon.println(F("REMOTE DATA"));
     SerialMon.print(" The node this is from: ");
     SerialMon.println(header.from_node);
     SerialMon.print(" Node ID: ");
     for (byte b : payload.id)
       SerialMon.print(b, HEX);
     SerialMon.println();
-    for (int i = 0; i < numberOfSensors; i++) {
+    /*for (int i = 0; i < numberOfSensors; i++) {
       SerialMon.print(" Temperature");
       SerialMon.print(i + 1);
       SerialMon.print(": ");
@@ -249,9 +235,9 @@ void checkForNetworkData() {
         SerialMon.println(payload.temp[i], DEC);
     }
     SerialMon.print(" Battery status: ");
-    SerialMon.println(payload.bat, DEC);
+    SerialMon.println(payload.bat, DEC);*/
 
-    //fillBufferArray(&payload); // fill buffer array
+    fillBufferArray(&payload); // fill buffer array
   }
 }
 
@@ -272,28 +258,8 @@ void fillBufferArray(Payload_t *payloadAddress){
     payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
   payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
   payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
+  payLoadBuffer[bufferLocation].alarm = payloadAddress->alarm;
 
-  /*
-  // temp code
-  SerialMon.println("buffer data");
-  SerialMon.print(" The node this is from: ");
-  SerialMon.print(" Node ID: ");
-  for (byte b : payLoadBuffer[bufferLocation].id)
-    SerialMon.print(b, HEX);
-  SerialMon.println();
-  for (int i = 0; i < numberOfSensors; i++) {
-    SerialMon.print(" Temperature");
-    SerialMon.print(i + 1);
-    SerialMon.print(": ");
-    if (payLoadBuffer[bufferLocation].temp[i] == -12700)
-      SerialMon.println("-");
-    else
-      SerialMon.println(payLoadBuffer[bufferLocation].temp[i], DEC);
-  }
-  SerialMon.print(" Battery status: ");
-  SerialMon.println(payLoadBuffer[bufferLocation].bat, DEC);
-  //end temp code
-  */
 }
 
 void sendArrayContent(){
@@ -301,11 +267,12 @@ void sendArrayContent(){
   // include the local data from the coordinator (temp, humidity, light, ...)
   // addLocalData(LocalData_t *localDataAddress)
   // clear array after sending
+
 }
 
 void addLocalData(LocalData_t *localDataAddress) {
-  for (uint8_t i = 0; i < 4; i++) // fill nodeId
-    localDataAddress->baseId[i] = nodeId[i];
+  for (uint8_t i = 0; i < 4; i++) // fill coordinatorId
+    localDataAddress->baseId[i] = coordId[i];
   localDataAddress->baseTemp = myHumidity.readTemperature()*100;
   localDataAddress->baseHum = myHumidity.readHumidity();
   localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
@@ -313,29 +280,18 @@ void addLocalData(LocalData_t *localDataAddress) {
   //localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
-void sendScaleData(){
-  // This data will have to come from second arduino
-}
-
-void sendGprsData(uint8_t gprsMode){
-
-  //initGprs();
-  SerialMon.println(F("SEND DATA THROUGH GPRS"));
-  SerialMon.print(F("Mode:"));
-  SerialMon.println(gprsMode);
-  // Restart takes quite some time
-  // To skip it, call init() instead of restart()
-  SerialMon.println(F("   Initializing modem..."));
+void gprsInit(){ //clean
+  //SerialMon.println(F("Initializing modem..."));
   delay(1000);
   modem.restart();
-delay(3000);
+  delay(1000);
   String modemInfo = modem.getModemInfo();
-delay(1000);
   SerialMon.print(F("   Modem: "));
+  delay(1000);
   SerialMon.println(modemInfo);
+}
 
-  //////////////////////////////////////////////
-
+void gprsConnectNetwork(){
   SerialMon.print(F("   Waiting for network..."));
   if (!modem.waitForNetwork()) {
     SerialMon.println(" fail");
@@ -352,7 +308,9 @@ delay(1000);
     return;
   }
   SerialMon.println(" OK");
+}
 
+void gprsConnectHost(){
   SerialMon.print(F("   Connecting to "));
   SerialMon.print(server);
   if (!client.connect(server, port)) {
@@ -361,11 +319,62 @@ delay(1000);
     return;
   }
   SerialMon.println(" OK");
+}
 
-  client.print(String("GET ") + resource + "?e=2" + " HTTP/1.0\r\n");
+void gprsDisconnectHost(){
+  client.stop();
+  SerialMon.println(F("   Server disconnected"));
+}
+
+void gprsRegisterNode(){
+  gprsConnectHost();
+  client.print(String("GET ") + "/register?coordinator=CO");
+  for (byte b : coordId)
+    client.print(b, HEX);
+  client.print(" HTTP/1.0\r\n");
   client.print(String("Host: ") + server + "\r\n");
   client.print("Connection: close\r\n\r\n");
+  getGprsResponse();
+  gprsDisconnectHost();
+}
 
+void gprsSendHiveData(){
+  for (int i = 0; i < BUFFERSIZE; i++){
+    if (payLoadBuffer[i].containsData != 0){
+      gprsConnectHost();
+      client.print("GET /hivedata?nodeId=");
+      for (byte b : payLoadBuffer[i].id)
+        client.print(b, HEX);
+      for (int a = 0; a < numberOfSensors; a++) {
+        client.print("&temp" + String(a+1) + "=");
+        if (payLoadBuffer[i].temp[a] == -12700)
+          client.print("-");
+        else
+          client.print(payLoadBuffer[i].temp[a], DEC);
+      }
+      client.print("&hum=");
+      client.print(payLoadBuffer[i].humidity);
+      client.print("&bat=");
+      client.print(payLoadBuffer[i].bat);
+      client.print(" HTTP/1.0\r\n");
+      client.print(String("Host: ") + server + "\r\n");
+      client.print("Connection: close\r\n\r\n");
+      getGprsResponse();
+      gprsDisconnectHost();
+    }
+  }
+}
+
+void gprsSendScaleData(){
+  gprsConnectHost();
+  client.print(String("GET ") + resource + "?scale=2" + " HTTP/1.0\r\n");
+  client.print(String("Host: ") + server + "\r\n");
+  client.print("Connection: close\r\n\r\n");
+  getGprsResponse();
+  gprsDisconnectHost();
+}
+
+void getGprsResponse(){
   unsigned long timeout = millis();
   while (client.connected() && millis() - timeout < 10000L) {
     // Print available data
@@ -373,17 +382,14 @@ delay(1000);
       char c = client.read();
       SerialMon.print(c);
       timeout = millis();
-      if(c == '#')
-        SerialMon.print("   - Send OK");
+      //if(c == '#')
+        //SerialMon.print("   - Send OK");
     }
   }
   SerialMon.println();
+}
 
-  client.stop();
-  SerialMon.println(F("   Server disconnected"));
-
+void gprsEnd(){
   modem.gprsDisconnect();
   SerialMon.println(F("   GPRS disconnected"));
-
-SerialMon.println(F("End GPRS"));
 }
