@@ -1,14 +1,14 @@
 #include <Arduino.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define radioPin1 7 // RF24
-#define radioPin2 8 // RF24
+#define radioPin1 8 // RF24
+#define radioPin2 9 // RF24
 
-#define softSerialAtRx 3
-#define softSerialAtTx 4
+#define softSerialAtRx 4
+#define softSerialAtTx 5
 #define resetPin A2 // resetting esp/gprs module
-#define softSerialScaleRx 9
-#define softSerialScaleTx 10
+#define softSerialScaleRx 6
+#define softSerialScaleTx 7
 
 #define MISO 11
 #define MOSI 12
