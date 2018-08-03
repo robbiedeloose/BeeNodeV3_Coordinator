@@ -62,13 +62,13 @@ RF24 radio(radioPin1, radioPin2); // start RF24 communication layer
 RF24Network network(radio);       // start RF24 network layer
 const uint16_t thisNode = 00;     // Coordinator address
 ////////////////////////////////////////////////////////////////////////////////
-
 #include <Wire.h>
-
 ///////////////////////////////////// HUMIDITY /////////////////////////////////
 #include "SparkFunHTU21D.h"
-//#include <Wire.h>
-HTU21D myHumidity;           // humidity + temperature
+HTU21D myHumidity;
+///////////////////////////////////// LUX //////////////////////////////////////
+#include <BH1750.h>
+BH1750 lightMeter;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
@@ -168,9 +168,10 @@ void setup() { //clean
   for (byte b : coordId)
     SerialMon.print(b, HEX);
   SerialMon.println();
-  clearPayloadBuffer();   // clear payloadbuffer
-  battery.setRefInternal(); // Set voltage reference
-  myHumidity.begin(); // start humidity sensor
+  clearPayloadBuffer();
+  battery.setRefInternal();
+  myHumidity.begin();
+  lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
 
   registerNode();
@@ -229,6 +230,8 @@ void loop() { //clean
   Serial.println(myHumidity.readTemperature());
   Serial.println(myHumidity.readHumidity());
 
+  Serial.println(lightMeter.readLightLevel());
+
   SerialMon.println("sleep");
   delay(500); // give serial time to complete before node goes to sleep
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
@@ -278,8 +281,7 @@ void addLocalData(LocalData_t *localDataAddress) {
   localDataAddress->baseTemp = myHumidity.readTemperature()*100;
   localDataAddress->baseHum = myHumidity.readHumidity();
   localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
-  //localDataAddress->baseLux = sensor.readLightLevel();
-  //localDataAddress->baseLux = lightMeter.readLightLevel();
+  localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
 void gprsInit(){ //clean
