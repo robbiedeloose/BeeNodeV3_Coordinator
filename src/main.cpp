@@ -7,8 +7,6 @@
 #define softSerialAtRx 4
 #define softSerialAtTx 5
 #define resetPin A2 // resetting esp/gprs module
-#define softSerialScaleRx 6
-#define softSerialScaleTx 7
 
 #define MISO 11
 #define MOSI 12
@@ -20,7 +18,6 @@
 #define SerialMon Serial
 #include <SoftwareSerial.h>
 SoftwareSerial SerialAT(softSerialAtRx, softSerialAtTx);
-SoftwareSerial SerialScale(softSerialScaleRx, softSerialScaleTx);
 ///////////////////////////////////////// GPRS /////////////////////////////////
 // Select your modem:
 #define TINY_GSM_MODEM_SIM800
@@ -64,9 +61,13 @@ boolean GprsAvtice = false;
 RF24 radio(radioPin1, radioPin2); // start RF24 communication layer
 RF24Network network(radio);       // start RF24 network layer
 const uint16_t thisNode = 00;     // Coordinator address
+////////////////////////////////////////////////////////////////////////////////
+
+#include <Wire.h>
+
 ///////////////////////////////////// HUMIDITY /////////////////////////////////
 #include "SparkFunHTU21D.h"
-#include <Wire.h>
+//#include <Wire.h>
 HTU21D myHumidity;           // humidity + temperature
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
@@ -145,12 +146,21 @@ void clearPayloadBuffer(){
   }
 }
 
+void registerNode(){
+  SerialMon.println(F("Register to NodeRed"));
+  delay(1000);
+  gprsInit();
+  gprsConnectNetwork();
+  gprsRegisterNode();
+  gprsEnd();
+}
 /////////////// SETUP //////////////////////////////////////////////////////////
 void setup() { //clean
   SerialMon.begin(9600); // SerialMon Start
   SerialAT.begin(9600); // Serial port for GPRS
   //SerialScale.begin(38400); //Serial port for scale module
   delay(1000);
+  Wire.begin();
   // print some coordinator node information
   SerialMon.print(F("BeeNode v0.1"));
   beeNodeId.getId(coordId); // send array to fill as parameter
@@ -163,12 +173,7 @@ void setup() { //clean
   myHumidity.begin(); // start humidity sensor
   initRFRadio(90, thisNode); // start nRF24l radio
 
-  SerialMon.println(F("Register to NodeRed"));
-  delay(1000);
-  gprsInit();
-  gprsConnectNetwork();
-  gprsRegisterNode();
-  gprsEnd();
+  registerNode();
 
   SerialMon.println("init complete");
 }
@@ -204,6 +209,25 @@ void loop() { //clean
     //gprsSendScaleData();
     gprsEnd();
   }
+  Serial.println("request scale");
+  Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
+     delay(100);
+   while (Wire.available()) { // slave may send less than requested
+     char c = Wire.read(); // receive a byte as character
+     Serial.print(c);         // print the character
+}
+ Serial.println();
+   Serial.println("request scale");
+   Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
+    while (Wire.available()) { // slave may send less than requested
+      char c = Wire.read(); // receive a byte as character
+      Serial.print(c);         // print the character
+    }
+  Serial.println();
+  delay(2000);
+
+  Serial.println(myHumidity.readTemperature());
+  Serial.println(myHumidity.readHumidity());
 
   SerialMon.println("sleep");
   delay(500); // give serial time to complete before node goes to sleep
@@ -211,7 +235,7 @@ void loop() { //clean
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
-void checkForNetworkData() {
+void checkForNetworkData(){
   network.update(); // check network communication regularly
   RF24NetworkHeader header; // create header variable
   Payload_t payload;        // create payload variable
