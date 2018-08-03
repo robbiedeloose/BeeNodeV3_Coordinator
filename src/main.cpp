@@ -69,6 +69,9 @@ HTU21D myHumidity;
 ///////////////////////////////////// LUX //////////////////////////////////////
 #include <BH1750.h>
 BH1750 lightMeter;
+///////////////////////////////////// RTC //////////////////////////////////////
+#include "uRTCLib.h"
+uRTCLib rtc(0x68, 0x57);
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
@@ -154,6 +157,38 @@ void registerNode(){
   gprsRegisterNode();
   gprsEnd();
 }
+
+void setRtc(){
+  rtc.set(0, 42, 16, 6, 2, 5, 15);
+	//  RTCLib::set(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year)
+}
+void displayRtc(){
+  rtc.refresh();
+
+	Serial.print("RTC DateTime: ");
+	Serial.print(rtc.year());
+	Serial.print('/');
+	Serial.print(rtc.month());
+	Serial.print('/');
+	Serial.print(rtc.day());
+
+	Serial.print(' ');
+
+	Serial.print(rtc.hour());
+	Serial.print(':');
+	Serial.print(rtc.minute());
+	Serial.print(':');
+	Serial.print(rtc.second());
+
+	Serial.print(" DOW: ");
+	Serial.print(rtc.dayOfWeek());
+
+	Serial.print(" - Temp: ");
+	Serial.print(rtc.temp());
+
+	Serial.println();
+
+}
 /////////////// SETUP //////////////////////////////////////////////////////////
 void setup() { //clean
   SerialMon.begin(9600); // SerialMon Start
@@ -173,7 +208,7 @@ void setup() { //clean
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
-
+  setRtc();
   registerNode();
 
   SerialMon.println("init complete");
@@ -231,6 +266,7 @@ void loop() { //clean
   Serial.println(myHumidity.readHumidity());
 
   Serial.println(lightMeter.readLightLevel());
+  displayRtc();
 
   SerialMon.println("sleep");
   delay(500); // give serial time to complete before node goes to sleep
