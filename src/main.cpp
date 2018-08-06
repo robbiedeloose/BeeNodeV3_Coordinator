@@ -74,8 +74,9 @@ BH1750 lightMeter;
 //uRTCLib rtc(0x68, 0x57);
 #include "RTClib.h"
 RTC_DS3231 rtc;
-double epochCounter = 0;
+double epochCounter = 0L;
 #define minuteInterval 5
+DateTime now;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
@@ -101,7 +102,8 @@ struct Payload_t {
 };
 
 struct PayloadBuffer_t {
-  uint8_t containsData;
+  //uint8_t containsData;
+  double timestamp;
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
@@ -129,8 +131,8 @@ PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 // setup functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
 // getting data
-void checkForNetworkData();
-void fillBufferArray(Payload_t *payloadAddress);
+void checkForNetworkData(double timestamp);
+void fillBufferArray(Payload_t *payloadAddress, double timestamp);
 void addLocalData(LocalData_t *localDataAddress);
 void addScaleData();
 // gprs functions
@@ -148,7 +150,7 @@ void gprsSendScaleData();
 
 void clearPayloadBuffer(){
   for (int i = 0; i < BUFFERSIZE; i++){
-    payLoadBuffer[i].containsData = 0;
+    payLoadBuffer[i].timestamp = 0L;
   }
 }
 
@@ -162,7 +164,7 @@ void registerNode(){
 }
 
 void printCurrentDatTime(){
-    DateTime now = rtc.now();
+    now = rtc.now();
 
     Serial.print(now.year(), DEC);
     Serial.print('/');
@@ -213,7 +215,7 @@ void setup() { //clean
   // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
 //}
 
-  DateTime now = rtc.now();
+  now = rtc.now();
   printCurrentDatTime();
   epochCounter = now.unixtime();
 
@@ -238,19 +240,21 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
 void loop() { //clean
-  DateTime now = rtc.now();
+  now = rtc.now();
   // display current epoch and next send time in epoch
+  double timestamp = now.unixtime();
+
+  checkForNetworkData(timestamp); // network data available?
+
   SerialMon.println();
   SerialMon.println();
   SerialMon.print("Now: ");
-  SerialMon.print(now.unixtime());
+  SerialMon.print(timestamp);
   SerialMon.print(" Next: ");
   SerialMon.println(epochCounter, 0);
 
-  checkForNetworkData(); // network data available?
-
-  if (now.unixtime() > epochCounter){
-    epochCounter = now.unixtime() + (minuteInterval * 60);
+  if (timestamp >= epochCounter){
+    epochCounter = timestamp + (minuteInterval * 60L);
 
     Serial.println("sending");
     gprsInit();
@@ -267,7 +271,7 @@ void loop() { //clean
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
-void checkForNetworkData(){
+void checkForNetworkData(double timestamp){
   network.update(); // check network communication regularly
   RF24NetworkHeader header; // create header variable
   Payload_t payload;        // create payload variable
@@ -279,20 +283,22 @@ void checkForNetworkData(){
     for (byte b : payload.id)
       SerialMon.print(b, HEX);
     SerialMon.println();
-    fillBufferArray(&payload); // fill buffer array
+    fillBufferArray(&payload, timestamp); // fill buffer array
   }
 }
 
-void fillBufferArray(Payload_t *payloadAddress){
+void fillBufferArray(Payload_t *payloadAddress, double timestamp){
   uint8_t bufferLocation = 0;
   // get next free buffer location
   for (int i = 0; i < BUFFERSIZE; i++){
-    if (payLoadBuffer[bufferLocation].containsData != 0)
+    if (payLoadBuffer[bufferLocation].timestamp != 0)
       bufferLocation++;
   }
   SerialMon.print(" Array position ");
   SerialMon.println(bufferLocation); // print the buffer location that is used
-  payLoadBuffer[bufferLocation].containsData = 1;
+  now = rtc.now;
+  payLoadBuffer[bufferLocation].timestamp = timestamp;
+  Serial.println(payLoadBuffer[bufferLocation].timestamp,DEC);
   // copy temp array to next free buffer location
   for (int i = 0; i<4;i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
@@ -371,11 +377,13 @@ void gprsRegisterNode(){
 
 void gprsSendHiveData(){
   for (int i = 0; i < BUFFERSIZE; i++){
-    if (payLoadBuffer[i].containsData != 0){
+    if (payLoadBuffer[i].timestamp != 0){
       gprsConnectHost();
       client.print("GET /hivedata?nodeId=");
       for (byte b : payLoadBuffer[i].id)
         client.print(b, HEX);
+        client.print("&time=");
+        client.print(payLoadBuffer[i].timestamp);
       for (int a = 0; a < numberOfSensors; a++) {
         client.print("&temp" + String(a+1) + "=");
         if (payLoadBuffer[i].temp[a] == -12700)
