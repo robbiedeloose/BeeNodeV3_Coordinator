@@ -29,7 +29,7 @@ SoftwareSerial SerialAT(softSerialAtRx, softSerialAtTx);
 
 // Your GPRS credentials
 // Leave empty, if missing user or pass
-const char apn[]  = "hologram";
+const char apn[] = "hologram";
 const char user[] = "";
 const char pass[] = "";
 // Server details
@@ -39,19 +39,19 @@ const char resource[] = "/hiveonly";
 boolean GprsAvtice = false;
 
 #ifdef DUMP_AT_COMMANDS
-  #include <StreamDebugger.h>
-  StreamDebugger debugger(SerialAT, SerialMon);
-  TinyGsm modem(debugger);
+#include <StreamDebugger.h>
+StreamDebugger debugger(SerialAT, SerialMon);
+TinyGsm modem(debugger);
 #else
-  TinyGsm modem(SerialAT);
+TinyGsm modem(SerialAT);
 #endif
 
 #ifdef USE_SSL
-  TinyGsmClientSecure client(modem);
-  const int  port = 443;
+TinyGsmClientSecure client(modem);
+const int port = 443;
 #else
-  TinyGsmClient client(modem);
-  const int  port = 1880;
+TinyGsmClient client(modem);
+const int port = 1880;
 #endif
 
 ///////////////////////////////////// RADIO ////////////////////////////////////
@@ -71,11 +71,11 @@ HTU21D myHumidity;
 BH1750 lightMeter;
 ///////////////////////////////////// RTC //////////////////////////////////////
 //#include "uRTCLib.h"
-//uRTCLib rtc(0x68, 0x57);
+// uRTCLib rtc(0x68, 0x57);
 #include "RTClib.h"
 RTC_DS3231 rtc;
 double epochCounter = 0L;
-#define minuteInterval 1
+#define minuteInterval 15
 DateTime now;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
@@ -102,7 +102,7 @@ struct Payload_t {
 };
 
 struct PayloadBuffer_t {
-  //uint8_t containsData;
+  // uint8_t containsData;
   double timestamp;
   uint8_t id[4];
   int16_t temp[6];
@@ -120,6 +120,7 @@ struct LocalData_t {
   uint16_t baseBat;
   uint16_t baseWind;
   uint16_t baseRain;
+  char scales[2][23];
 };
 
 // Globalstruct array to collect data before Sending
@@ -127,6 +128,7 @@ struct LocalData_t {
 PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
 #define numberOfSensors 6
+
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
@@ -134,7 +136,7 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress);
 void checkForNetworkData(double timestamp);
 void fillBufferArray(Payload_t *payloadAddress, double timestamp);
 void addLocalData(LocalData_t *localDataAddress);
-void addScaleData();
+void addScaleData(LocalData_t *localDataAddress);
 // gprs functions
 void gprsInit();
 void gprsConnectNetwork();
@@ -150,13 +152,13 @@ void registerNode();
 void gprsSendScaleData();
 ////////////////////////////////////////////////////////////////////////////////
 
-void clearPayloadBuffer(){
-  for (int i = 0; i < BUFFERSIZE; i++){
+void clearPayloadBuffer() {
+  for (int i = 0; i < BUFFERSIZE; i++) {
     payLoadBuffer[i].timestamp = 0L;
   }
 }
 
-void registerNode(){
+void registerNode() {
   SerialMon.println(F("Register to NodeRed"));
   gprsInit();
   gprsConnectNetwork();
@@ -164,31 +166,30 @@ void registerNode(){
   gprsEnd();
 }
 
-void printCurrentDatTime(){
-    now = rtc.now();
+void printCurrentDateTime() {
+  now = rtc.now();
 
-    Serial.print(now.year(), DEC);
-    Serial.print('/');
-    Serial.print(now.month(), DEC);
-    Serial.print('/');
-    Serial.print(now.day(), DEC);
-    Serial.print(" ");
-    Serial.print(now.hour(), DEC);
-    Serial.print(':');
-    Serial.print(now.minute(), DEC);
-    Serial.print(':');
-    Serial.print(now.second(), DEC);
-    Serial.println();
-    Serial.println(now.unixtime(),DEC);
+  Serial.print(now.year(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.day(), DEC);
+  Serial.print(" ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.println();
+  Serial.println(now.unixtime(), DEC);
 }
 
 /////////////// SETUP //////////////////////////////////////////////////////////
-void setup() { //clean
-  SerialMon.begin(9600); // SerialMon Start
-  SerialAT.begin(9600); // Serial port for GPRS
-  //SerialScale.begin(38400); //Serial port for scale module
-  delay(1000);
+void setup() { // clean
   Wire.begin();
+  SerialMon.begin(9600); // SerialMon Start
+  SerialAT.begin(9600);  // Serial port for GPRS
+  delay(1000);
   // print some coordinator node information
   SerialMon.print(F("BeeNode v0.1"));
   beeNodeId.getId(coordId); // send array to fill as parameter
@@ -200,33 +201,23 @@ void setup() { //clean
   battery.setRefInternal();
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
-
-  //rtc.refresh();
-  if (! rtc.begin()) {
-    Serial.println("Couldn't find RTC");
-    while (1);
-  }
-  //if (rtc.lostPower()) {
-  Serial.println("RTC lost power, lets set the time!");
-  // following line sets the RTC to the date & time this sketch was compiled
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-
-  // This line sets the RTC with an explicit date & time, for example to set
-  // January 21, 2014 at 3am you would call:
-  // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
-//}
-
-  now = rtc.now();
-  printCurrentDatTime();
-  epochCounter = now.unixtime();
-
   initRFRadio(90, thisNode); // start nRF24l radio
+  if (!rtc.begin())
+    Serial.println("Couldn't find RTC");
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, lets set the time!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+  printCurrentDateTime();
   registerNode();
-
   SerialMon.println("init complete");
 }
 
-void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
+void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
   SerialMon.print(F("Rf Channel: "));
   SerialMon.print(channel);
   SerialMon.print(", NodeAddress:  ");
@@ -234,29 +225,30 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
 
   SPI.begin();
   radio.begin();
-  //radio.setPALevel(HIGH);
+  // radio.setPALevel(HIGH);
   network.begin(channel, nodeAddress);
   network.setup_watchdog(9); // Sets the WDT to trigger every second
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
-void loop() { //clean
+void loop() { // clean
   now = rtc.now();
   // display current epoch and next send time in epoch
   double timestamp = now.unixtime();
 
   checkForNetworkData(timestamp); // network data available?
 
-  if (timestamp >= epochCounter){
+  if (timestamp >= epochCounter) {
     epochCounter = timestamp + (minuteInterval * 60L);
     LocalData_t localData;
     addLocalData(&localData);
+    addScaleData(&localData);
     Serial.println("sending");
     gprsInit();
     gprsConnectNetwork();
     gprsSendCoData(&localData);
     gprsSendHiveData(&localData);
-    //gprsSendScaleData();
+    // gprsSendScaleData();
     gprsEnd();
     clearPayloadBuffer();
   }
@@ -267,13 +259,14 @@ void loop() { //clean
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
-void checkForNetworkData(double timestamp){
-  network.update(); // check network communication regularly
+void checkForNetworkData(double timestamp) {
+  network.update();         // check network communication regularly
   RF24NetworkHeader header; // create header variable
   Payload_t payload;        // create payload variable
 
   while (network.available()) { // Any data on the network ready to read
-    network.read(header, &payload, sizeof(payload)); // If so, grab it and print it out
+    network.read(header, &payload,
+                 sizeof(payload)); // If so, grab it and print it out
     // Display Node Data
     SerialMon.print(" Node ID: ");
     for (byte b : payload.id)
@@ -283,10 +276,10 @@ void checkForNetworkData(double timestamp){
   }
 }
 
-void fillBufferArray(Payload_t *payloadAddress, double timestamp){
+void fillBufferArray(Payload_t *payloadAddress, double timestamp) {
   uint8_t bufferLocation = 0;
   // get next free buffer location
-  for (int i = 0; i < BUFFERSIZE; i++){
+  for (int i = 0; i < BUFFERSIZE; i++) {
     if (payLoadBuffer[bufferLocation].timestamp != 0)
       bufferLocation++;
   }
@@ -294,27 +287,47 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp){
   SerialMon.println(bufferLocation); // print the buffer location that is used
   payLoadBuffer[bufferLocation].timestamp = timestamp;
   // copy temp array to next free buffer location
-  for (int i = 0; i<4;i++)
+  for (int i = 0; i < 4; i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
   for (int i = 0; i < numberOfSensors; i++)
     payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
   payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
   payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
   payLoadBuffer[bufferLocation].alarm = payloadAddress->alarm;
-
 }
 
 void addLocalData(LocalData_t *localDataAddress) {
   for (uint8_t i = 0; i < 4; i++) // fill coordinatorId
     localDataAddress->baseId[i] = coordId[i];
-  localDataAddress->baseTemp = myHumidity.readTemperature()*100;
+  localDataAddress->baseTemp = myHumidity.readTemperature() * 100;
   localDataAddress->baseHum = myHumidity.readHumidity();
   localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
   localDataAddress->baseLux = lightMeter.readLightLevel();
 }
 
-void gprsInit(){ //clean
-  //SerialMon.println(F("Initializing modem..."));
+void addScaleData(LocalData_t *localDataAddress) {
+  for (int a = 0; a < 2; a++) {
+    Wire.requestFrom(1, 25); // request 6 bytes from slave device #8
+    delay(100);
+    uint8_t i = 0;
+    while (Wire.available()) {
+      char c = Wire.read();
+      if (c != '<') {
+        localDataAddress->scales[a][i] = c;
+        i++;
+      } else if (c == '>') {
+        break;
+      }
+    }
+    for (int i = 0; i < 23; i++) {
+      Serial.print(localDataAddress->scales[a][i]);
+    }
+    Serial.println();
+  }
+}
+
+void gprsInit() { // clean
+  // SerialMon.println(F("Initializing modem..."));
   delay(1000);
   modem.restart();
   String modemInfo = modem.getModemInfo();
@@ -322,7 +335,7 @@ void gprsInit(){ //clean
   SerialMon.println(modemInfo);
 }
 
-void gprsConnectNetwork(){
+void gprsConnectNetwork() {
   SerialMon.print(F("  Waiting for network..."));
   if (!modem.waitForNetwork()) {
     SerialMon.println(F(" fail"));
@@ -331,7 +344,7 @@ void gprsConnectNetwork(){
   }
   SerialMon.println(F(" OK"));
 
-  SerialMon.print(F("  Connecting to "));
+  SerialMon.print(F(" Connecting to "));
   SerialMon.print(apn);
   if (!modem.gprsConnect(apn, user, pass)) {
     SerialMon.println(F(" fail"));
@@ -341,8 +354,8 @@ void gprsConnectNetwork(){
   SerialMon.println(F(" OK"));
 }
 
-void gprsConnectHost(){
-  SerialMon.print(F("  Connecting to "));
+void gprsConnectHost() {
+  SerialMon.print(F(" Connecting to "));
   SerialMon.print(server);
   if (!client.connect(server, port)) {
     SerialMon.println(F(" fail"));
@@ -352,12 +365,12 @@ void gprsConnectHost(){
   SerialMon.println(F(" OK"));
 }
 
-void gprsDisconnectHost(){
+void gprsDisconnectHost() {
   client.stop();
   SerialMon.println(F("  Server disconnected"));
 }
 
-void gprsRegisterCo(){
+void gprsRegisterCo() {
   gprsConnectHost();
   client.print("GET /register?coordinator=CO");
   for (byte b : coordId)
@@ -369,21 +382,29 @@ void gprsRegisterCo(){
   gprsDisconnectHost();
 }
 
-void gprsSendCoData(LocalData_t *localDataAddress){
+void gprsSendCoData(LocalData_t *localDataAddress) {
   gprsConnectHost();
   client.print("GET /codata?coordinator=CO");
   for (byte b : localDataAddress->baseId)
     client.print(b, HEX);
-  client.print("&coTemp=");
+  client.print("&temp=");
   client.print(localDataAddress->baseTemp);
-  client.print("&coHum=");
+  client.print("&hum=");
   client.print(localDataAddress->baseHum);
-  client.print("&coLux=");
+  client.print("&lux=");
   client.print(localDataAddress->baseLux);
-  client.print("&coBat=");
+  client.print("&bat=");
   client.print(localDataAddress->baseBat);
-  client.print("&coCharge=");
+  client.print("&charge=");
   client.print("x");
+  client.print("&scaleset1=");
+  for (int i = 0; i < 23; i++) {
+    client.print(localDataAddress->scales[0][i]);
+  }
+  client.print("&scaleset2=");
+  for (int i = 0; i < 23; i++) {
+    client.print(localDataAddress->scales[1][i]);
+  }
   client.print(" HTTP/1.0\r\n");
   client.print(String("Host: ") + server + "\r\n");
   client.print("Connection: close\r\n\r\n");
@@ -391,17 +412,17 @@ void gprsSendCoData(LocalData_t *localDataAddress){
   gprsDisconnectHost();
 }
 
-void gprsSendHiveData(LocalData_t *localDataAddress){
-  for (int i = 0; i < BUFFERSIZE; i++){
-    if (payLoadBuffer[i].timestamp != 0){
+void gprsSendHiveData(LocalData_t *localDataAddress) {
+  for (int i = 0; i < BUFFERSIZE; i++) {
+    if (payLoadBuffer[i].timestamp != 0) {
       gprsConnectHost();
       client.print("GET /hivedata?nodeId=");
       for (byte b : payLoadBuffer[i].id)
         client.print(b, HEX);
-        client.print("&time=");
-        client.print(payLoadBuffer[i].timestamp);
+      client.print("&time=");
+      client.print(payLoadBuffer[i].timestamp);
       for (int a = 0; a < numberOfSensors; a++) {
-        client.print("&temp" + String(a+1) + "=");
+        client.print("&temp" + String(a + 1) + "=");
         if (payLoadBuffer[i].temp[a] == -12700)
           client.print("-");
         else
@@ -421,11 +442,6 @@ void gprsSendHiveData(LocalData_t *localDataAddress){
       client.print(localDataAddress->baseHum);
       client.print("&coLux=");
       client.print(localDataAddress->baseLux);
-      client.print("&coBat=");
-      client.print(localDataAddress->baseBat);
-      client.print("&coCharge=");
-      client.print("x");
-
       client.print(" HTTP/1.0\r\n");
       client.print(String("Host: ") + server + "\r\n");
       client.print("Connection: close\r\n\r\n");
@@ -435,28 +451,9 @@ void gprsSendHiveData(LocalData_t *localDataAddress){
   }
 }
 
-void gprsSendScaleData(){
-
-  Serial.println("request scale");
-  Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
-     delay(100);
-  while (Wire.available()) { // slave may send less than requested
-     char c = Wire.read(); // receive a byte as character
-     Serial.print(c);         // print the character
-  }
- Serial.println();
- Serial.println("request scale");
- Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
- while (Wire.available()) { // slave may send less than requested
-    char c = Wire.read(); // receive a byte as character
-    Serial.print(c);         // print the character
-  }
-  Serial.println();
-  delay(2000);
-
+void gprsSendScaleData() {
   gprsConnectHost();
   client.print("GET /scaledata?scale=2");
-  //
   client.print(" HTTP/1.0\r\n");
   client.print(String("Host: ") + server + "\r\n");
   client.print("Connection: close\r\n\r\n");
@@ -464,7 +461,7 @@ void gprsSendScaleData(){
   gprsDisconnectHost();
 }
 
-void getGprsResponse(){
+void getGprsResponse() {
   unsigned long timeout = millis();
   while (client.connected() && millis() - timeout < 10000L) {
     // Print available data
@@ -472,14 +469,14 @@ void getGprsResponse(){
       char c = client.read();
       SerialMon.print(c);
       timeout = millis();
-      //if(c == '#')
-        //SerialMon.print("   - Send OK");
+      // if(c == '#')
+      // SerialMon.print("   - Send OK");
     }
   }
   SerialMon.println();
 }
 
-void gprsEnd(){
+void gprsEnd() {
   modem.gprsDisconnect();
-  SerialMon.println(F("  GPRS disconnected"));
+  SerialMon.println(F(" GPRS disconnected"));
 }
