@@ -70,8 +70,12 @@ HTU21D myHumidity;
 #include <BH1750.h>
 BH1750 lightMeter;
 ///////////////////////////////////// RTC //////////////////////////////////////
-#include "uRTCLib.h"
-uRTCLib rtc(0x68, 0x57);
+//#include "uRTCLib.h"
+//uRTCLib rtc(0x68, 0x57);
+#include "RTClib.h"
+RTC_DS3231 rtc;
+double epochCounter = 0;
+#define minuteInterval 5
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
@@ -121,9 +125,6 @@ struct LocalData_t {
 PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
 #define numberOfSensors 6
-uint8_t sendCounter = 0;
-uint8_t minuteCounter = 0;
-#define minuteInterval 2
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
@@ -160,36 +161,24 @@ void registerNode(){
   gprsEnd();
 }
 
-void setRtc(){
-  rtc.set(0, 42, 16, 6, 2, 5, 15);
-	//  RTCLib::set(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year)
+void printCurrentDatTime(){
+    DateTime now = rtc.now();
+
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    Serial.print(" ");
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println();
+    Serial.println(now.unixtime(),DEC);
 }
-void displayRtc(){
-  rtc.refresh();
-	Serial.print("RTC DateTime: ");
-	Serial.print(rtc.year());
-	Serial.print('/');
-	Serial.print(rtc.month());
-	Serial.print('/');
-	Serial.print(rtc.day());
 
-	Serial.print(' ');
-
-	Serial.print(rtc.hour());
-	Serial.print(':');
-	Serial.print(rtc.minute());
-	Serial.print(':');
-	Serial.print(rtc.second());
-
-	Serial.print(" DOW: ");
-	Serial.print(rtc.dayOfWeek());
-
-	Serial.print(" - Temp: ");
-	Serial.print(rtc.temp());
-
-	Serial.println();
-
-}
 /////////////// SETUP //////////////////////////////////////////////////////////
 void setup() { //clean
   SerialMon.begin(9600); // SerialMon Start
@@ -208,10 +197,27 @@ void setup() { //clean
   battery.setRefInternal();
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
-  rtc.refresh();
-  minuteCounter = rtc.minute();
+
+  //rtc.refresh();
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  //if (rtc.lostPower()) {
+  Serial.println("RTC lost power, lets set the time!");
+  // following line sets the RTC to the date & time this sketch was compiled
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
+  // This line sets the RTC with an explicit date & time, for example to set
+  // January 21, 2014 at 3am you would call:
+  // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+//}
+
+  DateTime now = rtc.now();
+  printCurrentDatTime();
+  epochCounter = now.unixtime();
+
   initRFRadio(90, thisNode); // start nRF24l radio
-  setRtc();
   registerNode();
 
   SerialMon.println("init complete");
@@ -232,35 +238,27 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
 void loop() { //clean
+  DateTime now = rtc.now();
+  // display current epoch and next send time in epoch
   SerialMon.println();
   SerialMon.println();
-  SerialMon.print("Loop: ");
-  rtc.refresh();
-  SerialMon.print(rtc.minute());
-  SerialMon.print(" / ");
-  SerialMon.println(minuteCounter);
+  SerialMon.print("Now: ");
+  SerialMon.print(now.unixtime());
+  SerialMon.print(" Next: ");
+  SerialMon.println(epochCounter, 0);
+
   checkForNetworkData(); // network data available?
 
-  // If a given time threshold is breached, read the buffer array and send the data over gprs
-  // Timer yet to be implemented. RTC/counter..
-  // Send scale data
+  if (now.unixtime() > epochCounter){
+    epochCounter = now.unixtime() + (minuteInterval * 60);
 
-
-  rtc.refresh();
-  if (minuteCounter <= rtc.minute()){
-    ////////////////
     Serial.println("sending");
     gprsInit();
     gprsConnectNetwork();
     gprsSendHiveData();
     //gprsSendScaleData();
     gprsEnd();
-    ////////////////////
     clearPayloadBuffer();
-    rtc.refresh();
-    minuteCounter = rtc.minute() + minuteInterval;
-    if (minuteCounter >= 60)
-      minuteCounter = minuteCounter - 60;
   }
 
   SerialMon.println("sleep");
