@@ -245,13 +245,16 @@ void loop() { //clean
   double timestamp = now.unixtime();
 
   checkForNetworkData(timestamp); // network data available?
-
+  Serial.print(epochCounter - timestamp);
+  Serial.println(" seconds till next send...");
+  /*
   SerialMon.println();
   SerialMon.println();
   SerialMon.print("Now: ");
-  SerialMon.print(timestamp);
+  SerialMon.print(timestamp, 0);
   SerialMon.print(" Next: ");
   SerialMon.println(epochCounter, 0);
+  */
 
   if (timestamp >= epochCounter){
     epochCounter = timestamp + (minuteInterval * 60L);
@@ -296,9 +299,7 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp){
   }
   SerialMon.print(" Array position ");
   SerialMon.println(bufferLocation); // print the buffer location that is used
-  now = rtc.now;
   payLoadBuffer[bufferLocation].timestamp = timestamp;
-  Serial.println(payLoadBuffer[bufferLocation].timestamp,DEC);
   // copy temp array to next free buffer location
   for (int i = 0; i<4;i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
