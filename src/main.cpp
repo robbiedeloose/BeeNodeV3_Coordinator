@@ -75,7 +75,7 @@ BH1750 lightMeter;
 #include "RTClib.h"
 RTC_DS3231 rtc;
 double epochCounter = 0L;
-#define minuteInterval 5
+#define minuteInterval 1
 DateTime now;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
@@ -139,12 +139,14 @@ void addScaleData();
 void gprsInit();
 void gprsConnectNetwork();
 void gprsConnectHost();
-void gprsSendHiveData();
-void gprsRegisterNode();
+void gprsSendHiveData(LocalData_t *localDataAddress);
+void gprsRegisterCo();
+void gprsSendCoData(LocalData_t *localDataAddress);
 void gprsDisconnectHost();
 void gprsEnd();
 void getGprsResponse();
 // posting data
+void registerNode();
 void gprsSendScaleData();
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -156,10 +158,9 @@ void clearPayloadBuffer(){
 
 void registerNode(){
   SerialMon.println(F("Register to NodeRed"));
-  delay(1000);
   gprsInit();
   gprsConnectNetwork();
-  gprsRegisterNode();
+  gprsRegisterCo();
   gprsEnd();
 }
 
@@ -245,24 +246,16 @@ void loop() { //clean
   double timestamp = now.unixtime();
 
   checkForNetworkData(timestamp); // network data available?
-  Serial.print(epochCounter - timestamp);
-  Serial.println(" seconds till next send...");
-  /*
-  SerialMon.println();
-  SerialMon.println();
-  SerialMon.print("Now: ");
-  SerialMon.print(timestamp, 0);
-  SerialMon.print(" Next: ");
-  SerialMon.println(epochCounter, 0);
-  */
 
   if (timestamp >= epochCounter){
     epochCounter = timestamp + (minuteInterval * 60L);
-
+    LocalData_t localData;
+    addLocalData(&localData);
     Serial.println("sending");
     gprsInit();
     gprsConnectNetwork();
-    gprsSendHiveData();
+    gprsSendCoData(&localData);
+    gprsSendHiveData(&localData);
     //gprsSendScaleData();
     gprsEnd();
     clearPayloadBuffer();
@@ -364,7 +357,7 @@ void gprsDisconnectHost(){
   SerialMon.println(F("  Server disconnected"));
 }
 
-void gprsRegisterNode(){
+void gprsRegisterCo(){
   gprsConnectHost();
   client.print("GET /register?coordinator=CO");
   for (byte b : coordId)
@@ -376,7 +369,29 @@ void gprsRegisterNode(){
   gprsDisconnectHost();
 }
 
-void gprsSendHiveData(){
+void gprsSendCoData(LocalData_t *localDataAddress){
+  gprsConnectHost();
+  client.print("GET /codata?coordinator=CO");
+  for (byte b : localDataAddress->baseId)
+    client.print(b, HEX);
+  client.print("&coTemp=");
+  client.print(localDataAddress->baseTemp);
+  client.print("&coHum=");
+  client.print(localDataAddress->baseHum);
+  client.print("&coLux=");
+  client.print(localDataAddress->baseLux);
+  client.print("&coBat=");
+  client.print(localDataAddress->baseBat);
+  client.print("&coCharge=");
+  client.print("x");
+  client.print(" HTTP/1.0\r\n");
+  client.print(String("Host: ") + server + "\r\n");
+  client.print("Connection: close\r\n\r\n");
+  getGprsResponse();
+  gprsDisconnectHost();
+}
+
+void gprsSendHiveData(LocalData_t *localDataAddress){
   for (int i = 0; i < BUFFERSIZE; i++){
     if (payLoadBuffer[i].timestamp != 0){
       gprsConnectHost();
@@ -396,6 +411,21 @@ void gprsSendHiveData(){
       client.print(payLoadBuffer[i].humidity);
       client.print("&bat=");
       client.print(payLoadBuffer[i].bat);
+
+      client.print("&coId=CO");
+      for (byte b : localDataAddress->baseId)
+        client.print(b, HEX);
+      client.print("&coTemp=");
+      client.print(localDataAddress->baseTemp);
+      client.print("&coHum=");
+      client.print(localDataAddress->baseHum);
+      client.print("&coLux=");
+      client.print(localDataAddress->baseLux);
+      client.print("&coBat=");
+      client.print(localDataAddress->baseBat);
+      client.print("&coCharge=");
+      client.print("x");
+
       client.print(" HTTP/1.0\r\n");
       client.print(String("Host: ") + server + "\r\n");
       client.print("Connection: close\r\n\r\n");
