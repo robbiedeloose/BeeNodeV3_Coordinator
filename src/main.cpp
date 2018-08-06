@@ -122,6 +122,8 @@ PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
 #define numberOfSensors 6
 uint8_t sendCounter = 0;
+uint8_t minuteCounter = 0;
+#define minuteInterval 2
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // setup functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
@@ -164,7 +166,6 @@ void setRtc(){
 }
 void displayRtc(){
   rtc.refresh();
-
 	Serial.print("RTC DateTime: ");
 	Serial.print(rtc.year());
 	Serial.print('/');
@@ -207,6 +208,8 @@ void setup() { //clean
   battery.setRefInternal();
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
+  rtc.refresh();
+  minuteCounter = rtc.minute();
   initRFRadio(90, thisNode); // start nRF24l radio
   setRtc();
   registerNode();
@@ -231,42 +234,34 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { //clean
 void loop() { //clean
   SerialMon.println();
   SerialMon.println();
-  SerialMon.println("Loop");
+  SerialMon.print("Loop: ");
+  rtc.refresh();
+  SerialMon.print(rtc.minute());
+  SerialMon.print(" / ");
+  SerialMon.println(minuteCounter);
   checkForNetworkData(); // network data available?
 
   // If a given time threshold is breached, read the buffer array and send the data over gprs
   // Timer yet to be implemented. RTC/counter..
   // Send scale data
-  if (payLoadBuffer[1].containsData == 1){
+
+
+  rtc.refresh();
+  if (minuteCounter <= rtc.minute()){
+    ////////////////
     Serial.println("sending");
     gprsInit();
     gprsConnectNetwork();
     gprsSendHiveData();
     //gprsSendScaleData();
     gprsEnd();
+    ////////////////////
+    clearPayloadBuffer();
+    rtc.refresh();
+    minuteCounter = rtc.minute() + minuteInterval;
+    if (minuteCounter >= 60)
+      minuteCounter = minuteCounter - 60;
   }
-  Serial.println("request scale");
-  Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
-     delay(100);
-   while (Wire.available()) { // slave may send less than requested
-     char c = Wire.read(); // receive a byte as character
-     Serial.print(c);         // print the character
-}
- Serial.println();
-   Serial.println("request scale");
-   Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
-    while (Wire.available()) { // slave may send less than requested
-      char c = Wire.read(); // receive a byte as character
-      Serial.print(c);         // print the character
-    }
-  Serial.println();
-  delay(2000);
-
-  Serial.println(myHumidity.readTemperature());
-  Serial.println(myHumidity.readHumidity());
-
-  Serial.println(lightMeter.readLightLevel());
-  displayRtc();
 
   SerialMon.println("sleep");
   delay(500); // give serial time to complete before node goes to sleep
@@ -297,7 +292,7 @@ void fillBufferArray(Payload_t *payloadAddress){
     if (payLoadBuffer[bufferLocation].containsData != 0)
       bufferLocation++;
   }
-  SerialMon.print("Array position ");
+  SerialMon.print(" Array position ");
   SerialMon.println(bufferLocation); // print the buffer location that is used
   payLoadBuffer[bufferLocation].containsData = 1;
   // copy temp array to next free buffer location
@@ -404,6 +399,24 @@ void gprsSendHiveData(){
 }
 
 void gprsSendScaleData(){
+
+  Serial.println("request scale");
+  Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
+     delay(100);
+  while (Wire.available()) { // slave may send less than requested
+     char c = Wire.read(); // receive a byte as character
+     Serial.print(c);         // print the character
+  }
+ Serial.println();
+ Serial.println("request scale");
+ Wire.requestFrom(1, 25);    // request 6 bytes from slave device #8
+ while (Wire.available()) { // slave may send less than requested
+    char c = Wire.read(); // receive a byte as character
+    Serial.print(c);         // print the character
+  }
+  Serial.println();
+  delay(2000);
+
   gprsConnectHost();
   client.print("GET /scaledata?scale=2");
   //
