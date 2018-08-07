@@ -203,24 +203,24 @@ void setup() { // clean
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
   if (!rtc.begin())
-    Serial.println("Couldn't find RTC");
-  if (rtc.lostPower()) {
-    Serial.println("RTC lost power, lets set the time!");
-    // following line sets the RTC to the date & time this sketch was compiled
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    // This line sets the RTC with an explicit date & time, for example to set
-    // January 21, 2014 at 3am you would call:
-    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
-  }
+    // Serial.println("Couldn't find RTC");
+    if (rtc.lostPower()) {
+      Serial.println("RTC lost power");
+      // following line sets the RTC to the date & time this sketch was compiled
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      // This line sets the RTC with an explicit date & time, for example to set
+      // January 21, 2014 at 3am you would call:
+      // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    }
   printCurrentDateTime();
   registerNode();
   SerialMon.println("init complete");
 }
 
 void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
-  SerialMon.print(F("Rf Channel: "));
+  SerialMon.print(F("Channel: "));
   SerialMon.print(channel);
-  SerialMon.print(", NodeAddress:  ");
+  SerialMon.print(", Node:  ");
   SerialMon.println(nodeAddress);
 
   SPI.begin();
