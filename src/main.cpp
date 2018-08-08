@@ -23,9 +23,8 @@ SoftwareSerial SerialAT(softSerialAtRx, softSerialAtTx);
 #define TINY_GSM_MODEM_SIM800
 // Increase RX buffer if needed
 //#define TINY_GSM_RX_BUFFER 512
+#include <PubSubClient.h>
 #include <TinyGsmClient.h>
-// Uncomment this if you want to see all AT commands
-//#define DUMP_AT_COMMANDS
 
 // Your GPRS credentials
 // Leave empty, if missing user or pass
@@ -33,26 +32,11 @@ const char apn[] = "hologram";
 const char user[] = "";
 const char pass[] = "";
 // Server details
-const char server[] = "beelog.dynu.net";
-const char server2[] = "beelog2.dynu.net";
-const char resource[] = "/hiveonly";
-boolean GprsAvtice = false;
+const char *broker = "m20.cloudmqtt.com";
 
-#ifdef DUMP_AT_COMMANDS
-#include <StreamDebugger.h>
-StreamDebugger debugger(SerialAT, SerialMon);
-TinyGsm modem(debugger);
-#else
 TinyGsm modem(SerialAT);
-#endif
-
-#ifdef USE_SSL
-TinyGsmClientSecure client(modem);
-const int port = 443;
-#else
 TinyGsmClient client(modem);
-const int port = 1880;
-#endif
+PubSubClient mqtt(client);
 
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
@@ -158,13 +142,7 @@ void clearPayloadBuffer() {
   }
 }
 
-void registerNode() {
-  SerialMon.println(F("Register to NodeRed"));
-  gprsInit();
-  gprsConnectNetwork();
-  gprsRegisterCo();
-  gprsEnd();
-}
+void registerNode() { SerialMon.println(F("Register to NodeRed")); }
 
 void printCurrentDateTime() {
   now = rtc.now();
@@ -244,12 +222,7 @@ void loop() { // clean
     addLocalData(&localData);
     addScaleData(&localData);
     Serial.println("sending");
-    gprsInit();
-    gprsConnectNetwork();
-    gprsSendCoData(&localData);
-    gprsSendHiveData(&localData);
-    // gprsSendScaleData();
-    gprsEnd();
+    // send data
     clearPayloadBuffer();
   }
 
@@ -325,7 +298,7 @@ void addScaleData(LocalData_t *localDataAddress) {
     Serial.println();
   }
 }
-
+//////////// init gprs, connect and disconnect from network
 void gprsInit() { // clean
   // SerialMon.println(F("Initializing modem..."));
   delay(1000);
@@ -352,128 +325,6 @@ void gprsConnectNetwork() {
     return;
   }
   SerialMon.println(F(" OK"));
-}
-
-void gprsConnectHost() {
-  SerialMon.print(F(" Connecting to "));
-  SerialMon.print(server);
-  if (!client.connect(server, port)) {
-    SerialMon.println(F(" fail"));
-    delay(10000);
-    return;
-  }
-  SerialMon.println(F(" OK"));
-}
-
-void gprsDisconnectHost() {
-  client.stop();
-  SerialMon.println(F("  Server disconnected"));
-}
-
-void gprsRegisterCo() {
-  gprsConnectHost();
-  client.print("GET /register?coordinator=CO");
-  for (byte b : coordId)
-    client.print(b, HEX);
-  client.print(" HTTP/1.0\r\n");
-  client.print(String("Host: ") + server + "\r\n");
-  client.print("Connection: close\r\n\r\n");
-  getGprsResponse();
-  gprsDisconnectHost();
-}
-
-void gprsSendCoData(LocalData_t *localDataAddress) {
-  gprsConnectHost();
-  client.print("GET /codata?coordinator=CO");
-  for (byte b : localDataAddress->baseId)
-    client.print(b, HEX);
-  client.print("&temp=");
-  client.print(localDataAddress->baseTemp);
-  client.print("&hum=");
-  client.print(localDataAddress->baseHum);
-  client.print("&lux=");
-  client.print(localDataAddress->baseLux);
-  client.print("&bat=");
-  client.print(localDataAddress->baseBat);
-  client.print("&charge=");
-  client.print("x");
-  client.print("&scaleset1=");
-  for (int i = 0; i < 23; i++) {
-    client.print(localDataAddress->scales[0][i]);
-  }
-  client.print("&scaleset2=");
-  for (int i = 0; i < 23; i++) {
-    client.print(localDataAddress->scales[1][i]);
-  }
-  client.print(" HTTP/1.0\r\n");
-  client.print(String("Host: ") + server + "\r\n");
-  client.print("Connection: close\r\n\r\n");
-  getGprsResponse();
-  gprsDisconnectHost();
-}
-
-void gprsSendHiveData(LocalData_t *localDataAddress) {
-  for (int i = 0; i < BUFFERSIZE; i++) {
-    if (payLoadBuffer[i].timestamp != 0) {
-      gprsConnectHost();
-      client.print("GET /hivedata?nodeId=");
-      for (byte b : payLoadBuffer[i].id)
-        client.print(b, HEX);
-      client.print("&time=");
-      client.print(payLoadBuffer[i].timestamp);
-      for (int a = 0; a < numberOfSensors; a++) {
-        client.print("&temp" + String(a + 1) + "=");
-        if (payLoadBuffer[i].temp[a] == -12700)
-          client.print("-");
-        else
-          client.print(payLoadBuffer[i].temp[a], DEC);
-      }
-      client.print("&hum=");
-      client.print(payLoadBuffer[i].humidity);
-      client.print("&bat=");
-      client.print(payLoadBuffer[i].bat);
-
-      client.print("&coId=CO");
-      for (byte b : localDataAddress->baseId)
-        client.print(b, HEX);
-      client.print("&coTemp=");
-      client.print(localDataAddress->baseTemp);
-      client.print("&coHum=");
-      client.print(localDataAddress->baseHum);
-      client.print("&coLux=");
-      client.print(localDataAddress->baseLux);
-      client.print(" HTTP/1.0\r\n");
-      client.print(String("Host: ") + server + "\r\n");
-      client.print("Connection: close\r\n\r\n");
-      getGprsResponse();
-      gprsDisconnectHost();
-    }
-  }
-}
-
-void gprsSendScaleData() {
-  gprsConnectHost();
-  client.print("GET /scaledata?scale=2");
-  client.print(" HTTP/1.0\r\n");
-  client.print(String("Host: ") + server + "\r\n");
-  client.print("Connection: close\r\n\r\n");
-  getGprsResponse();
-  gprsDisconnectHost();
-}
-
-void getGprsResponse() {
-  unsigned long timeout = millis();
-  while (client.connected() && millis() - timeout < 10000L) {
-    // Print available data
-    while (client.available()) {
-      char c = client.read();
-      SerialMon.print(c);
-      timeout = millis();
-      // if(c == '#')
-      // SerialMon.print("   - Send OK");
-    }
-  }
-  SerialMon.println();
 }
 
 void gprsEnd() {
