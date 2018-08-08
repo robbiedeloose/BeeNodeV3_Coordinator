@@ -37,6 +37,29 @@ TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 ///////////////////////////////////// MQTT specific ////////////////////////////
 // define topics based on CO ID
+/*
+# Hive
+h/id
+h/coid
+h/d/t1
+h/d/t2
+h/d/t3
+h/d/t4
+h/d/t5
+h/d/t6
+h/d/hum
+h/bat
+h/d/w/temp
+h/d/w/hum
+h/d/w/lux
+
+# Coordinator
+co/id
+co/bat
+co/d/temp
+co/d/hum
+co/d/lux
+*/
 
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
@@ -119,7 +142,7 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp);
 void getLocalData(LocalData_t *localDataAddress);
 void getScaleData(LocalData_t *localDataAddress);
 // gprs network functions
-void gprsInit();
+void gprsResetModem();
 void gprsConnectNetwork();
 void gprsEnd();
 // sending data
@@ -134,19 +157,21 @@ void printCurrentDateTime();
 void clearPayloadBuffer();
 
 /////////////// SETUP //////////////////////////////////////////////////////////
-void setup() { // clean
+void setup() {
   Wire.begin();
-  SerialMon.begin(9600); // SerialMon Start
-  SerialAT.begin(9600);  // Serial port for GPRS
+  SerialMon.begin(9600);
+  SerialAT.begin(9600);
   delay(1000);
-  // print some coordinator node information
+
   SerialMon.print(F("BeeNode v0.1"));
   beeNodeId.getId(coordId);
   SerialMon.print(", Id: CO");
   for (byte b : coordId)
     SerialMon.print(b, HEX);
   SerialMon.println();
+
   clearPayloadBuffer();
+
   battery.setRefInternal();
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
@@ -162,18 +187,16 @@ void setup() { // clean
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
-void loop() { // clean
+void loop() {
   now = rtc.now();
-  // display current epoch and next send time in epoch
   double timestamp = now.unixtime();
-  checkForNetworkData(timestamp); // network data available?
+  checkForNetworkData(timestamp);
   if (timestamp >= epochCounter) {
     epochCounter = timestamp + (minuteInterval * 60L);
     LocalData_t localData;
     getLocalData(&localData);
     getScaleData(&localData);
     Serial.println("sending");
-    // send data
     clearPayloadBuffer();
   }
   SerialMon.println("sleep");
@@ -271,12 +294,11 @@ boolean mqttConnect() {
   }
   SerialMon.println(" OK");
   mqtt.publish("topicInit", "GsmClientTest started");
-  mqtt.subscribe("topicLed");
   return mqtt.connected();
 }
 
 //////////// init gprs, connect and disconnect from network ////////////////////
-void gprsInit() {
+void gprsResetModem() {
   // SerialMon.println(F("Initializing modem..."));
   modem.restart();
   String modemInfo = modem.getModemInfo();
