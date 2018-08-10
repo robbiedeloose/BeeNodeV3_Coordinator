@@ -152,6 +152,10 @@ void setup() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
   mqtt.setServer(broker, mqttPort);
+
+  //////
+  //////
+
   registerNodeMqtt();
 
   Serial.println("init complete");
@@ -206,7 +210,11 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp) {
   for (int i = 0; i < 4; i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
   for (int i = 0; i < numberOfSensors; i++)
-    payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
+    if (payloadAddress->temp[i] == -12700) {
+      payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
+    } else {
+      payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
+    }
   payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
   payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
   payLoadBuffer[bufferLocation].alarm = payloadAddress->alarm;
@@ -260,21 +268,51 @@ void sendMqttData(LocalData_t *local) {
   for (int b = 0; b < BUFFERSIZE; b++) {
     if (payLoadBuffer[b].timestamp != 0) {
       Serial.println("Send Data");
-      String data = "";
+      String id = "";
       for (uint8_t i = 0; i < 4; i++) {
-        data = data + String(payLoadBuffer[b].id[i], HEX);
+        id = id + String(payLoadBuffer[b].id[i], HEX);
       }
-      Serial.println(data);
-      data = data + ",";
-      data = data + String(payLoadBuffer[b].timestamp) + ",";
-      for (size_t i = 0; i < 6; i++) {
-        data = data + String(payLoadBuffer[b].temp[i]) + ",";
-      }
-      data = data + String(local->baseTemp) + ",";
+      Serial.println(id);
+      char cId[10];
+      id.toCharArray(cId, id.length() + 1);
+
+      char dest[8] = "";
+      char buf1[8] = ""; // = "strg1";
+      char buf2[8] = ""; // = "string2";
+      char buf3[8] = "";
+      char buf4[8] = "";
+      char buf5[8] = "";
+      char buf6[8] = "";
+
+      itoa(payLoadBuffer[b].temp[0], buf1, 10);
+      itoa(payLoadBuffer[b].temp[1], buf2, 10);
+      itoa(payLoadBuffer[b].temp[2], buf3, 10);
+      itoa(payLoadBuffer[b].temp[3], buf4, 10);
+      itoa(payLoadBuffer[b].temp[4], buf5, 10);
+      itoa(payLoadBuffer[b].temp[5], buf6, 10);
+
+      strcpy(dest, buf1);
+      strcat(dest, ",");
+      strcat(dest, buf2);
+      strcat(dest, ",");
+      strcat(dest, buf3);
+      strcat(dest, ",");
+      strcat(dest, buf4);
+      strcat(dest, ",");
+      strcat(dest, buf5);
+      strcat(dest, ",");
+      strcat(dest, buf6);
+      strcat(dest, ",");
+      strcat(dest, cId);
+
+      Serial.println(dest);
+
+      //  data = data + String(payLoadBuffer[b].timestamp) + ",";
+      /*data = data + String() + ",";
       data = data + String(local->baseHum) + ",";
       data = data + String(local->baseLux) + ",";
       Serial.println(data.length());
-      Serial.println(data);
+      Serial.println(data);*/
     }
   }
   // mqtt.disconnect();
