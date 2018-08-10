@@ -14,15 +14,10 @@
 
 #define seedRef A3 // seed for random function
 
-////////////////////////////////////////// Serials /////////////////////////////
-#define SerialMon Serial
+///////////////////////////////////////// GPRS /////////////////////////////////
 #include <SoftwareSerial.h>
 SoftwareSerial SerialAT(softSerialAtRx, softSerialAtTx);
-///////////////////////////////////////// GPRS /////////////////////////////////
-// Select your modem:
 #define TINY_GSM_MODEM_SIM800
-// Increase RX buffer if needed
-//#define TINY_GSM_RX_BUFFER 512
 #include <PubSubClient.h>
 #include <TinyGsmClient.h>
 // Your GPRS credentials
@@ -31,35 +26,14 @@ const char user[] = "";
 const char pass[] = "";
 // Server details
 const char *broker = "m20.cloudmqtt.com";
+const uint16_t mqttPort = 15913;
+const char *mqttUser = "oseiokpx";
+const char *mqttPswd = "31IMHCdWxVVt";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 ///////////////////////////////////// MQTT specific ////////////////////////////
-// define topics based on CO ID
-/*
-# Hive
-h/id
-h/coid
-h/d/t1
-h/d/t2
-h/d/t3
-h/d/t4
-h/d/t5
-h/d/t6
-h/d/hum
-h/bat
-h/d/w/temp
-h/d/w/hum
-h/d/w/lux
-
-# Coordinator
-co/id
-co/bat
-co/d/temp
-co/d/hum
-co/d/lux
-*/
 
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
@@ -82,7 +56,7 @@ BH1750 lightMeter;
 #include "RTClib.h"
 RTC_DS3231 rtc;
 double epochCounter = 0L;
-#define minuteInterval 15
+#define minuteInterval 2
 DateTime now;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
@@ -109,12 +83,10 @@ struct Payload_t {
 };
 
 struct PayloadBuffer_t {
-  // uint8_t containsData;
   double timestamp;
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
-  uint16_t weight;
   uint16_t humidity;
   uint8_t alarm;
 };
@@ -125,8 +97,6 @@ struct LocalData_t {
   uint16_t baseHum;
   uint16_t baseLux;
   uint16_t baseBat;
-  uint16_t baseWind;
-  uint16_t baseRain;
   char scales[2][23];
 };
 
@@ -139,8 +109,8 @@ PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // getting data
 void fillBufferArray(Payload_t *payloadAddress, double timestamp);
-void getLocalData(LocalData_t *localDataAddress);
-void getScaleData(LocalData_t *localDataAddress);
+void getLocalData(LocalData_t *local);
+void getScaleData(LocalData_t *local);
 // gprs network functions
 void gprsResetModem();
 void gprsConnectNetwork();
@@ -148,27 +118,26 @@ void gprsEnd();
 // sending data
 void registerNodeMqtt();
 // MQTT specific
-
+void sendMqttData(LocalData_t *local);
 // radio functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
 void checkForNetworkData(double timestamp);
 // misc Functions
-void printCurrentDateTime();
 void clearPayloadBuffer();
 
 /////////////// SETUP //////////////////////////////////////////////////////////
 void setup() {
   Wire.begin();
-  SerialMon.begin(9600);
+  Serial.begin(9600);
   SerialAT.begin(9600);
   delay(1000);
 
-  SerialMon.print(F("BeeNode v0.1"));
+  Serial.print(F("BeeNode v0.1"));
   beeNodeId.getId(coordId);
-  SerialMon.print(", Id: CO");
+  Serial.print(", Id: CO");
   for (byte b : coordId)
-    SerialMon.print(b, HEX);
-  SerialMon.println();
+    Serial.print(b, HEX);
+  Serial.println();
 
   clearPayloadBuffer();
 
@@ -176,14 +145,16 @@ void setup() {
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
-  if (!rtc.begin())
-    if (rtc.lostPower()) {
-      Serial.println("RTC lost power");
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    }
-  printCurrentDateTime();
+  if (!rtc.begin()) {
+  }
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+  mqtt.setServer(broker, mqttPort);
   registerNodeMqtt();
-  SerialMon.println("init complete");
+
+  Serial.println("init complete");
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
@@ -196,10 +167,11 @@ void loop() {
     LocalData_t localData;
     getLocalData(&localData);
     getScaleData(&localData);
-    Serial.println("sending");
+    Serial.println("time!");
+    sendMqttData(&localData);
     clearPayloadBuffer();
   }
-  SerialMon.println("sleep");
+  Serial.println("sleep");
   delay(500); // give serial time to complete before node goes to sleep
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
 }
@@ -212,10 +184,10 @@ void checkForNetworkData(double timestamp) {
 
   while (network.available()) { // Any data on the network ready to read
     network.read(header, &payload, sizeof(payload));
-    SerialMon.print(" Node ID: ");
+    Serial.print(" Node ID: ");
     for (byte b : payload.id)
-      SerialMon.print(b, HEX);
-    SerialMon.println();
+      Serial.print(b, HEX);
+    Serial.println();
     fillBufferArray(&payload, timestamp);
   }
 }
@@ -227,8 +199,8 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp) {
     if (payLoadBuffer[bufferLocation].timestamp != 0)
       bufferLocation++;
   }
-  SerialMon.print(" Array position ");
-  SerialMon.println(bufferLocation); // print the buffer location that is used
+  Serial.print(" Array position ");
+  Serial.println(bufferLocation); // print the buffer location that is used
   payLoadBuffer[bufferLocation].timestamp = timestamp;
   // copy temp array to next free buffer location
   for (int i = 0; i < 4; i++)
@@ -240,16 +212,16 @@ void fillBufferArray(Payload_t *payloadAddress, double timestamp) {
   payLoadBuffer[bufferLocation].alarm = payloadAddress->alarm;
 }
 
-void getLocalData(LocalData_t *localDataAddress) {
+void getLocalData(LocalData_t *local) {
   for (uint8_t i = 0; i < 4; i++) // fill coordinatorId
-    localDataAddress->baseId[i] = coordId[i];
-  localDataAddress->baseTemp = myHumidity.readTemperature() * 100;
-  localDataAddress->baseHum = myHumidity.readHumidity();
-  localDataAddress->baseBat = battery.getVoltage() * 100; // Battery
-  localDataAddress->baseLux = lightMeter.readLightLevel();
+    local->baseId[i] = coordId[i];
+  local->baseTemp = myHumidity.readTemperature() * 100;
+  local->baseHum = myHumidity.readHumidity();
+  local->baseBat = battery.getVoltage() * 100; // Battery
+  local->baseLux = lightMeter.readLightLevel();
 }
 
-void getScaleData(LocalData_t *localDataAddress) {
+void getScaleData(LocalData_t *local) {
   for (int a = 0; a < 2; a++) {
     Wire.requestFrom(1, 25); // request 6 bytes from slave device #8
     delay(100);
@@ -257,84 +229,95 @@ void getScaleData(LocalData_t *localDataAddress) {
     while (Wire.available()) {
       char c = Wire.read();
       if (c != '<') {
-        localDataAddress->scales[a][i] = c;
+        local->scales[a][i] = c;
         i++;
       } else if (c == '>') {
         break;
       }
     }
-    for (int i = 0; i < 23; i++) {
-      Serial.print(localDataAddress->scales[a][i]);
-    }
-    Serial.println();
   }
 }
 
 //////////// MQTT Code /////////////////////////////////////////////////////////
 void registerNodeMqtt() {
-  SerialMon.println(F("Register to NodeRed"));
-  if (mqtt.connect("m20.cloudmqtt.com", "oseiokpx", "31IMHCdWxVVt")) {
-   mqtt.publish("CO/regsiter","CO12345678");
- }
+  gprsResetModem();
+  gprsConnectNetwork();
+  now = rtc.now();
+  String s = String("CO");
+  for (uint8_t i = 0; i < 4; i++) {
+    s = s + String(coordId[i], HEX);
+  }
+  s = s + "," + String(now.unixtime());
+  char b[12];
+  s.toCharArray(b, s.length() + 1);
+  if (mqtt.connect(b, mqttUser, mqttPswd)) {
+    mqtt.publish("co/reg", b);
+  }
+  gprsEnd();
 }
 
-boolean mqttConnect() {
-  SerialMon.print("Connecting to ");
-  SerialMon.print(broker);
-
-  // Connect to MQTT Broker
-  boolean status = mqtt.connect("GsmClientTest");
-
-  // Or, if you want to authenticate MQTT:
-  //boolean status = mqtt.connect("GsmClientName", "mqtt_user", "mqtt_pass");
-
-  if (status == false) {
-    SerialMon.println(" fail");
-    return false;
+void sendMqttData(LocalData_t *local) {
+  for (int b = 0; b < BUFFERSIZE; b++) {
+    if (payLoadBuffer[b].timestamp != 0) {
+      Serial.println("Send Data");
+      String data = "";
+      for (uint8_t i = 0; i < 4; i++) {
+        data = data + String(payLoadBuffer[b].id[i], HEX);
+      }
+      Serial.println(data);
+      data = data + ",";
+      data = data + String(payLoadBuffer[b].timestamp) + ",";
+      for (size_t i = 0; i < 6; i++) {
+        data = data + String(payLoadBuffer[b].temp[i]) + ",";
+      }
+      data = data + String(local->baseTemp) + ",";
+      data = data + String(local->baseHum) + ",";
+      data = data + String(local->baseLux) + ",";
+      Serial.println(data.length());
+      Serial.println(data);
+    }
   }
-  SerialMon.println(" OK");
-  mqtt.publish("topicInit", "GsmClientTest started");
-  return mqtt.connected();
+  // mqtt.disconnect();
+  // gprsEnd();
 }
 
 //////////// init gprs, connect and disconnect from network ////////////////////
 void gprsResetModem() {
-  // SerialMon.println(F("Initializing modem..."));
   modem.restart();
-  String modemInfo = modem.getModemInfo();
-  SerialMon.print(F("  Modem: "));
-  SerialMon.println(modemInfo);
+  // String modemInfo = modem.getModemInfo();
+  // Serial.print(F("  Modem: "));
+  // Serial.println(modemInfo);
 }
 
 void gprsConnectNetwork() {
-  SerialMon.print(F("  Waiting for network..."));
+  Serial.print("  Waiting for network...");
   if (!modem.waitForNetwork()) {
-    SerialMon.println(F(" fail"));
+    Serial.println(" fail");
     delay(10000);
     return;
   }
-  SerialMon.println(F(" OK"));
-  SerialMon.print(F(" Connecting to "));
-  SerialMon.print(apn);
+  Serial.println(" OK");
+  Serial.print(" Connecting to ");
+  Serial.print(apn);
   if (!modem.gprsConnect(apn, user, pass)) {
-    SerialMon.println(F(" fail"));
+    Serial.println(" fail");
     delay(10000);
     return;
   }
-  SerialMon.println(F(" OK"));
+  Serial.println(F(" OK"));
 }
 
 void gprsEnd() {
   modem.gprsDisconnect();
-  SerialMon.println(F(" GPRS disconnected"));
+  // Serial.println(F(" GPRS disconnected"));
 }
 
 //////////// init nrf radio ////////////////////////////////////////////////////
 void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
-  SerialMon.print(F("Channel: "));
-  SerialMon.print(channel);
-  SerialMon.print(", Node:  ");
-  SerialMon.println(nodeAddress);
+  Serial.print("Channel: ");
+  Serial.print(channel);
+  Serial.print(", Node:  ");
+  Serial.println(nodeAddress);
 
   SPI.begin();
   radio.begin();
@@ -348,22 +331,4 @@ void clearPayloadBuffer() {
   for (int i = 0; i < BUFFERSIZE; i++) {
     payLoadBuffer[i].timestamp = 0L;
   }
-}
-
-void printCurrentDateTime() {
-  now = rtc.now();
-
-  Serial.print(now.year(), DEC);
-  Serial.print('/');
-  Serial.print(now.month(), DEC);
-  Serial.print('/');
-  Serial.print(now.day(), DEC);
-  Serial.print(" ");
-  Serial.print(now.hour(), DEC);
-  Serial.print(':');
-  Serial.print(now.minute(), DEC);
-  Serial.print(':');
-  Serial.print(now.second(), DEC);
-  Serial.println();
-  Serial.println(now.unixtime(), DEC);
 }
