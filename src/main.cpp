@@ -160,7 +160,7 @@ void loop() {
     LocalData_t localData;
     getLocalData(&localData);
     getScaleData(&localData);
-    //sendMqttData(&localData);
+    sendMqttData(&localData);
     clearPayloadBuffer();
   }
   Serial.println(F("sleep"));
@@ -240,13 +240,21 @@ void registerNodeMqtt() {
 }
 
 void sendMqttData(LocalData_t *local) {
+  gprsResetModem();
+  gprsConnectNetwork();
   for (int b = 0; b < BUFFERSIZE; b++) {
     if (payLoadBuffer[b].temp[0] != 0) {
-      Serial.println(F("Send Data"));
-      //char buf[120] = "";
-      //sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
+      Serial.print(F("Send buffer "));
+      Serial.println(b);
+      char buf[120] = "";
+      sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
+      Serial.println(buf);
 
-      //Serial.println(buf);
+      char bufId[12] = "";
+      sprintf(bufId, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
+      if (mqtt.connect(bufId, mqttUser, mqttPswd)) {
+        mqtt.publish("h/d", buf);
+      }
       /*
       data = data + String(local->baseHum) + ",";
       data = data + String(local->baseLux) + ",";
@@ -254,8 +262,8 @@ void sendMqttData(LocalData_t *local) {
       Serial.println(data);*/
     }
   }
-  // mqtt.disconnect();
-  // gprsEnd();
+  mqtt.disconnect();
+  gprsEnd();
 }
 
 //////////// init gprs, connect and disconnect from network ////////////////////
