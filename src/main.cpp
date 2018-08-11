@@ -34,6 +34,7 @@ TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 ///////////////////////////////////// MQTT specific ////////////////////////////
+char mqttCl[12] = "";
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
 #include <RF24Network.h>
@@ -132,6 +133,8 @@ void setup() {
   for (byte b : coordId)
     Serial.print(b, HEX);
   Serial.println();
+  sprintf(mqttCl, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
+
 
   battery.setRefInternal();
   myHumidity.begin();
@@ -212,7 +215,7 @@ void getLocalData(LocalData_t *local) {
 
 void getScaleData(LocalData_t *local) {
   for (int a = 0; a < 2; a++) {
-    Wire.requestFrom(1, 25); // request 6 bytes from slave device #8
+    Wire.requestFrom(1, 25);
     delay(100);
     uint8_t i = 0;
     while (Wire.available()) {
@@ -231,10 +234,8 @@ void getScaleData(LocalData_t *local) {
 void registerNodeMqtt() {
   gprsResetModem();
   gprsConnectNetwork();
-  char bufId[12] = "";
-  sprintf(bufId, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
-  if (mqtt.connect(bufId, mqttUser, mqttPswd)) {
-    mqtt.publish("co/reg", bufId);
+  if (mqtt.connect(mqttCl, mqttUser, mqttPswd)) {
+    mqtt.publish("co/reg", mqttCl);
   }
   gprsEnd();
 }
@@ -248,18 +249,14 @@ void sendMqttData(LocalData_t *local) {
       Serial.println(b);
       char buf[120] = "";
       sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
-      Serial.println(buf);
 
-      char bufId[12] = "";
-      sprintf(bufId, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
-      if (mqtt.connect(bufId, mqttUser, mqttPswd)) {
+      if (mqtt.connect(mqttCl, mqttUser, mqttPswd)) {
         mqtt.publish("h/d", buf);
       }
       /*
-      data = data + String(local->baseHum) + ",";
-      data = data + String(local->baseLux) + ",";
-      Serial.println(data.length());
-      Serial.println(data);*/
+      data = data + String(local->baseHum)
+      data = data + String(local->baseLux)
+      */
     }
   }
   mqtt.disconnect();
