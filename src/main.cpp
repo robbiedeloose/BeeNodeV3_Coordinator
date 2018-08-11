@@ -34,7 +34,6 @@ TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 ///////////////////////////////////// MQTT specific ////////////////////////////
-
 ///////////////////////////////////// RADIO ////////////////////////////////////
 #include <RF24.h>
 #include <RF24Network.h>
@@ -51,13 +50,10 @@ HTU21D myHumidity;
 #include <BH1750.h>
 BH1750 lightMeter;
 ///////////////////////////////////// RTC //////////////////////////////////////
-//#include "uRTCLib.h"
-// uRTCLib rtc(0x68, 0x57);
-#include "RTClib.h"
-RTC_DS3231 rtc;
-double epochCounter = 0L;
-#define minuteInterval 2
-DateTime now;
+#include "uRTCLib.h"
+uRTCLib rtc(0x68, 0x57);
+const uint8_t interval = 2;
+uint8_t nextSend;
 ///////////////////////////////////// EEPROM ///////////////////////////////////
 // EEPROM address locations
 #include <EEPROM.h>      //EEPROM
@@ -83,7 +79,6 @@ struct Payload_t {
 };
 
 struct PayloadBuffer_t {
-  double timestamp;
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
@@ -108,7 +103,7 @@ PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
 
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // getting data
-void fillBufferArray(Payload_t *payloadAddress, double timestamp);
+void fillBufferArray(Payload_t *payloadAddress);
 void getLocalData(LocalData_t *local);
 void getScaleData(LocalData_t *local);
 // gprs network functions
@@ -121,7 +116,7 @@ void registerNodeMqtt();
 void sendMqttData(LocalData_t *local);
 // radio functions
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
-void checkForNetworkData(double timestamp);
+void checkForNetworkData();
 // misc Functions
 void clearPayloadBuffer();
 
@@ -134,78 +129,71 @@ void setup() {
 
   Serial.print(F("BeeNode v0.1"));
   beeNodeId.getId(coordId);
-  Serial.print(", Id: CO");
+  Serial.print(F(", Id: CO"));
   for (byte b : coordId)
     Serial.print(b, HEX);
   Serial.println();
-
-  clearPayloadBuffer();
 
   battery.setRefInternal();
   myHumidity.begin();
   lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
-  if (!rtc.begin()) {
-  }
-  if (rtc.lostPower()) {
-    Serial.println("RTC lost power");
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
-  mqtt.setServer(broker, mqttPort);
 
-  //////
-  //////
+  mqtt.setServer(broker, mqttPort);
 
   registerNodeMqtt();
 
-  Serial.println("init complete");
+  clearPayloadBuffer();
+  rtc.refresh();
+  nextSend = rtc.minute();
+  Serial.println(F("init complete"));
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
 void loop() {
-  now = rtc.now();
-  double timestamp = now.unixtime();
-  checkForNetworkData(timestamp);
-  if (timestamp >= epochCounter) {
-    epochCounter = timestamp + (minuteInterval * 60L);
+  checkForNetworkData();
+  rtc.refresh();
+  if (nextSend <= rtc.minute()) {
+    nextSend = rtc.minute() + interval;
+    if (nextSend >= 60)
+      nextSend = nextSend - 60;
+    Serial.println(F("timer tripped"));
     LocalData_t localData;
     getLocalData(&localData);
     getScaleData(&localData);
-    Serial.println("time!");
-    sendMqttData(&localData);
+    //sendMqttData(&localData);
     clearPayloadBuffer();
   }
-  Serial.println("sleep");
+  Serial.println(F("sleep"));
   delay(500); // give serial time to complete before node goes to sleep
   network.sleepNode(15, 0); // 15 cycles of 4 seconds
 }
 
 //// Getting data //////////////////////////////////////////////////////////////
-void checkForNetworkData(double timestamp) {
+void checkForNetworkData() {
   network.update();
   RF24NetworkHeader header;
   Payload_t payload;
 
   while (network.available()) { // Any data on the network ready to read
     network.read(header, &payload, sizeof(payload));
-    Serial.print(" Node ID: ");
+    Serial.print(F(" Node ID: "));
     for (byte b : payload.id)
       Serial.print(b, HEX);
     Serial.println();
-    fillBufferArray(&payload, timestamp);
+    fillBufferArray(&payload);
   }
 }
 
-void fillBufferArray(Payload_t *payloadAddress, double timestamp) {
+void fillBufferArray(Payload_t *payloadAddress) {
   uint8_t bufferLocation = 0;
   // get next free buffer location
   for (int i = 0; i < BUFFERSIZE; i++) {
-    if (payLoadBuffer[bufferLocation].timestamp != 0)
+    if (payLoadBuffer[bufferLocation].temp[0] != 0)
       bufferLocation++;
   }
-  Serial.print(" Array position ");
+  Serial.print(F(" Array position "));
   Serial.println(bufferLocation); // print the buffer location that is used
-  payLoadBuffer[bufferLocation].timestamp = timestamp;
   // copy temp array to next free buffer location
   for (int i = 0; i < 4; i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
@@ -246,83 +234,23 @@ void getScaleData(LocalData_t *local) {
 void registerNodeMqtt() {
   gprsResetModem();
   gprsConnectNetwork();
-  now = rtc.now();
-  String s = String("CO");
-  for (uint8_t i = 0; i < 4; i++) {
-    s = s + String(coordId[i], HEX);
-  }
-  s = s + "," + String(now.unixtime());
-  char b[12];
-  s.toCharArray(b, s.length() + 1);
-  if (mqtt.connect(b, mqttUser, mqttPswd)) {
-    mqtt.publish("co/reg", b);
+  char bufId[12] = "";
+  sprintf(bufId, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
+  if (mqtt.connect(bufId, mqttUser, mqttPswd)) {
+    mqtt.publish("co/reg", bufId);
   }
   gprsEnd();
 }
 
 void sendMqttData(LocalData_t *local) {
   for (int b = 0; b < BUFFERSIZE; b++) {
-    if (payLoadBuffer[b].timestamp != 0) {
-      Serial.println("Send Data");
+    if (payLoadBuffer[b].temp[0] != 0) {
+      Serial.println(F("Send Data"));
+      //char buf[120] = "";
+      //sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
 
-      char dest[100] = "";
-      sprintf(dest, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
-
-      Serial.println(dest);
-      /*  String id = "";
-        for (uint8_t i = 0; i < 4; i++) {
-          id = id + String(payLoadBuffer[b].id[i], HEX);
-        }
-        id = id + 0;
-        Serial.println(id);
-        char res[10];
-        id.toCharArray(res, id.length() + 1);
-
-        char timeBuf[10] = "";
-        dtostrf(payLoadBuffer[b].timestamp, 7, 0, timeBuf);
-
-
-        char buf1[8] = ""; // = "strg1";
-        char buf2[8] = ""; // = "string2";
-        char buf3[8] = "";
-        char buf4[8] = "";
-        char buf5[8] = "";
-        char buf6[8] = "";
-
-        itoa(payLoadBuffer[b].temp[0], buf1, 10);
-        itoa(payLoadBuffer[b].temp[1], buf2, 10);
-        itoa(payLoadBuffer[b].temp[2], buf3, 10);
-        itoa(payLoadBuffer[b].temp[3], buf4, 10);
-        itoa(payLoadBuffer[b].temp[4], buf5, 10);
-        itoa(payLoadBuffer[b].temp[5], buf6, 10);
-
-        Serial.println(strlen(res));
-
-        memcpy(dest, res, strlen(res));
-        memcpy(dest + strlen(res), buf1, strlen(buf1));
-        memcpy(dest + strlen(buf1) + strlen(res), buf2, strlen(buf2));
-        Serial.println(strlen(dest));
-        /*
-        //concat using stracat
-        strcpy(dest, buf1);
-        strcat(dest, ",");
-        strcat(dest, buf2);
-        strcat(dest, ",");
-        strcat(dest, buf3);
-        strcat(dest, ",");
-        strcat(dest, buf4);
-        strcat(dest, ",");
-        strcat(dest, buf5);
-        strcat(dest, ",");
-        strcat(dest, buf6);
-        // strcat(dest, ",");
-        // strcat(dest, cId);
-        */
+      //Serial.println(buf);
       /*
-            Serial.println(dest);
-      */
-      //  data = data + String(payLoadBuffer[b].timestamp) + ",";
-      /*data = data + String() + ",";
       data = data + String(local->baseHum) + ",";
       data = data + String(local->baseLux) + ",";
       Serial.println(data.length());
@@ -336,23 +264,23 @@ void sendMqttData(LocalData_t *local) {
 //////////// init gprs, connect and disconnect from network ////////////////////
 void gprsResetModem() {
   modem.restart();
-  // String modemInfo = modem.getModemInfo();
-  // Serial.print(F("  Modem: "));
-  // Serial.println(modemInfo);
+  String modemInfo = modem.getModemInfo();
+  Serial.print(F(" Modem: "));
+  Serial.println(modemInfo);
 }
 
 void gprsConnectNetwork() {
-  Serial.print("  Waiting for network...");
+  Serial.print(F(" Waiting for network..."));
   if (!modem.waitForNetwork()) {
-    Serial.println(" fail");
+    Serial.println(F(" fail"));
     delay(10000);
     return;
   }
-  Serial.println(" OK");
-  Serial.print(" Connecting to ");
+  Serial.println(F(" OK"));
+  Serial.print(F(" Connecting to "));
   Serial.print(apn);
   if (!modem.gprsConnect(apn, user, pass)) {
-    Serial.println(" fail");
+    Serial.println(F(" fail"));
     delay(10000);
     return;
   }
@@ -361,14 +289,13 @@ void gprsConnectNetwork() {
 
 void gprsEnd() {
   modem.gprsDisconnect();
-  // Serial.println(F(" GPRS disconnected"));
 }
 
 //////////// init nrf radio ////////////////////////////////////////////////////
 void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
-  Serial.print("Channel: ");
+  Serial.print(F("Channel: "));
   Serial.print(channel);
-  Serial.print(", Node:  ");
+  Serial.print(F(", Node: "));
   Serial.println(nodeAddress);
 
   SPI.begin();
@@ -381,6 +308,6 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
 //////////// Misc Functions ////////////////////////////////////////////////////
 void clearPayloadBuffer() {
   for (int i = 0; i < BUFFERSIZE; i++) {
-    payLoadBuffer[i].timestamp = 0L;
+    payLoadBuffer[i].temp[0] = 0;
   }
 }
