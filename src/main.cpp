@@ -83,7 +83,6 @@ struct PayloadBuffer_t {
   int16_t temp[6];
   uint16_t bat;
   uint16_t humidity;
-  uint8_t alarm;
 };
 
 struct LocalData_t {
@@ -194,14 +193,12 @@ void fillBufferArray(Payload_t *payloadAddress) {
   }
   Serial.print(F(" Array position "));
   Serial.println(bufferLocation); // print the buffer location that is used
-  // copy temp array to next free buffer location
   for (int i = 0; i < 4; i++)
     payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
   for (int i = 0; i < numberOfSensors; i++)
     payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
   payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
   payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
-  payLoadBuffer[bufferLocation].alarm = payloadAddress->alarm;
 }
 
 void getLocalData(LocalData_t *local) {
