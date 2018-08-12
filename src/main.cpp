@@ -79,7 +79,7 @@ struct Payload_t {
   uint8_t alarm;
 };
 
-struct PayloadBuffer_t {
+struct plBuffer_t {
   uint8_t id[4];
   int16_t temp[6];
   uint16_t bat;
@@ -97,7 +97,7 @@ struct LocalData_t {
 
 // Globalstruct array to collect data before Sending
 #define BUFFERSIZE 6
-PayloadBuffer_t payLoadBuffer[BUFFERSIZE];
+plBuffer_t plBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
 #define numberOfSensors 6
 
@@ -118,7 +118,7 @@ void sendMqttData(LocalData_t *local);
 void initRFRadio(uint8_t channel, uint16_t nodeAddress);
 void checkForNetworkData();
 // misc Functions
-void clearPayloadBuffer();
+void clearplBuffer();
 
 /////////////// SETUP //////////////////////////////////////////////////////////
 void setup() {
@@ -145,10 +145,10 @@ void setup() {
 
   registerNodeMqtt();
 
-  clearPayloadBuffer();
+  clearplBuffer();
   rtc.refresh();
   nextSend = rtc.minute();
-  Serial.println(F("init complete"));
+  //Serial.println(F("init complete"));
 }
 
 /////////////// LOOP ///////////////////////////////////////////////////////////
@@ -164,7 +164,7 @@ void loop() {
     getLocalData(&localData);
     getScaleData(&localData);
     sendMqttData(&localData);
-    clearPayloadBuffer();
+    clearplBuffer();
   }
   Serial.println(F("sleep"));
   delay(500); // give serial time to complete before node goes to sleep
@@ -191,24 +191,24 @@ void fillBufferArray(Payload_t *payloadAddress) {
   uint8_t bufferLocation = 0;
   // get next free buffer location
   for (int i = 0; i < BUFFERSIZE; i++) {
-    if (payLoadBuffer[bufferLocation].temp[0] != 0)
+    if (plBuffer[bufferLocation].temp[0] != 0)
       bufferLocation++;
   }
   Serial.print(F(" Array position "));
   Serial.println(bufferLocation); // print the buffer location that is used
   for (int i = 0; i < 4; i++)
-    payLoadBuffer[bufferLocation].id[i] = payloadAddress->id[i];
+    plBuffer[bufferLocation].id[i] = payloadAddress->id[i];
   for (int i = 0; i < numberOfSensors; i++)
-    payLoadBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
-  payLoadBuffer[bufferLocation].humidity = payloadAddress->humidity;
-  payLoadBuffer[bufferLocation].bat = payloadAddress->bat;
+    plBuffer[bufferLocation].temp[i] = payloadAddress->temp[i];
+  plBuffer[bufferLocation].humidity = payloadAddress->humidity;
+  plBuffer[bufferLocation].bat = payloadAddress->bat;
 }
 
 void getLocalData(LocalData_t *local) {
   for (uint8_t i = 0; i < 4; i++) // fill coordinatorId
     local->baseId[i] = coordId[i];
   local->baseTemp = myHumidity.readTemperature() * 100;
-  local->baseHum = myHumidity.readHumidity();
+  local->baseHum = myHumidity.readHumidity() * 100;
   local->baseBat = battery.getVoltage() * 100; // Battery
   local->baseLux = lightMeter.readLightLevel();
 }
@@ -235,7 +235,7 @@ void registerNodeMqtt() {
   gprsResetModem();
   gprsConnectNetwork();
   if (mqtt.connect(mqttCl, mqttUser, mqttPswd)) {
-    mqtt.publish("co/reg", mqttCl);
+    mqtt.publish("c/r", mqttCl);
   }
   gprsEnd();
 }
@@ -244,13 +244,12 @@ void sendMqttData(LocalData_t *local) {
   gprsResetModem();
   gprsConnectNetwork();
   for (int b = 0; b < BUFFERSIZE; b++) {
-    if (payLoadBuffer[b].temp[0] != 0) {
+    if (plBuffer[b].temp[0] != 0) {
       Serial.print(F("Send buffer "));
       Serial.println(b);
-      char buf[120] = "";
-      sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d", payLoadBuffer[b].id[0], payLoadBuffer[b].id[1], payLoadBuffer[b].id[2], payLoadBuffer[b].id[3], payLoadBuffer[b].temp[0], payLoadBuffer[b].temp[1], payLoadBuffer[b].temp[2], payLoadBuffer[b].temp[3], payLoadBuffer[b].temp[4], payLoadBuffer[b].temp[5]);
-
       if (mqtt.connect(mqttCl, mqttUser, mqttPswd)) {
+        char buf[120] = "";
+        sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%d", plBuffer[b].id[0], plBuffer[b].id[1], plBuffer[b].id[2], plBuffer[b].id[3], plBuffer[b].temp[0], plBuffer[b].temp[1], plBuffer[b].temp[2], plBuffer[b].temp[3], plBuffer[b].temp[4], plBuffer[b].temp[5],plBuffer[b].humidity,plBuffer[b].bat,local->baseTemp,local->baseHum,local->baseLux);
         mqtt.publish("h/d", buf);
       }
       /*
@@ -308,8 +307,8 @@ void initRFRadio(uint8_t channel, uint16_t nodeAddress) { // clean
 }
 
 //////////// Misc Functions ////////////////////////////////////////////////////
-void clearPayloadBuffer() {
+void clearplBuffer() {
   for (int i = 0; i < BUFFERSIZE; i++) {
-    payLoadBuffer[i].temp[0] = 0;
+    plBuffer[i].temp[0] = 0;
   }
 }
