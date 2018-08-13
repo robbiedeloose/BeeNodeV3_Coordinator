@@ -45,11 +45,11 @@ const uint16_t thisNode = 00;     // Coordinator address
 ////////////////////////////////////////////////////////////////////////////////
 #include <Wire.h>
 ///////////////////////////////////// HUMIDITY /////////////////////////////////
-#include "SparkFunHTU21D.h"
-HTU21D myHumidity;
+//#include "SparkFunHTU21D.h"
+//HTU21D myHumidity;
 ///////////////////////////////////// LUX //////////////////////////////////////
-#include <BH1750.h>
-BH1750 lightMeter;
+//#include <BH1750.h>
+//BH1750 lightMeter;
 ///////////////////////////////////// RTC //////////////////////////////////////
 #include "uRTCLib.h"
 uRTCLib rtc(0x68, 0x57);
@@ -137,8 +137,8 @@ void setup() {
 
 
   battery.setRefInternal();
-  myHumidity.begin();
-  lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
+  //myHumidity.begin();
+  //lightMeter.begin(BH1750::ONE_TIME_HIGH_RES_MODE);
   initRFRadio(90, thisNode); // start nRF24l radio
 
   mqtt.setServer(broker, mqttPort);
@@ -207,10 +207,10 @@ void fillBufferArray(Payload_t *payloadAddress) {
 void getLocalData(LocalData_t *local) {
   for (uint8_t i = 0; i < 4; i++) // fill coordinatorId
     local->baseId[i] = coordId[i];
-  local->baseTemp = myHumidity.readTemperature() * 100;
-  local->baseHum = myHumidity.readHumidity() * 100;
+  local->baseTemp = 123;//myHumidity.readTemperature() * 100;
+  local->baseHum = 123;//myHumidity.readHumidity() * 100;
   local->baseBat = battery.getVoltage() * 100; // Battery
-  local->baseLux = lightMeter.readLightLevel();
+  local->baseLux = 1234; //lightMeter.readLightLevel();
 }
 
 void getScaleData(LocalData_t *local) {
