@@ -44,26 +44,14 @@ RF24Network network(radio);       // start RF24 network layer
 const uint16_t thisNode = 00;     // Coordinator address
 ////////////////////////////////////////////////////////////////////////////////
 #include <Wire.h>
-///////////////////////////////////// HUMIDITY /////////////////////////////////
-//#include "SparkFunHTU21D.h"
-//HTU21D myHumidity;
-///////////////////////////////////// LUX //////////////////////////////////////
-//#include <BH1750.h>
-//BH1750 lightMeter;
 ///////////////////////////////////// RTC //////////////////////////////////////
 #include "uRTCLib.h"
 uRTCLib rtc(0x68, 0x57);
 const uint8_t interval = 2;
 uint8_t nextSend;
-///////////////////////////////////// EEPROM ///////////////////////////////////
-// EEPROM address locations
-#include <EEPROM.h>      //EEPROM
-#define EEPRomDeviceId 1 // 1 byte for #, 4 bytes for ID
-#define EEPRomOptions 6
-uint8_t coordId[4];
+uint8_t coordId[4] = {0xAA,0xFF,0x00,0xFF};
 //////////////////////////////// own libraries /////////////////////////////////
-#include "RandomNodeId.h" // NodeId
-RandomNodeId beeNodeId;
+//#include "RandomNodeId.h" // NodeId
 #include "MesureVoltageInternal.h" // Internal Voltage measurement
 float iREF = 1.1;
 MesureVoltageInternal battery(iREF);
@@ -92,15 +80,18 @@ struct LocalData_t {
   uint16_t baseHum;
   uint16_t baseLux;
   uint16_t baseBat;
-  char scales[2][23];
+  char scales[2][24];
 };
 
+char s1[24];
+char s2[24];
+//char buf[120];
+//char buf2[120] = "";
 // Globalstruct array to collect data before Sending
 #define BUFFERSIZE 6
 plBuffer_t plBuffer[BUFFERSIZE];
 ////////////////////////////////////////////////////////////////////////////////
 #define numberOfSensors 6
-
 ////////////////////////// FUNCTION DECLARATIONS ///////////////////////////////
 // getting data
 void fillBufferArray(Payload_t *payloadAddress);
@@ -128,13 +119,13 @@ void setup() {
   delay(1000);
 
   Serial.print(F("BeeNode v0.1"));
-  beeNodeId.getId(coordId);
+  //beeNodeId.getId(coordId);
   Serial.print(F(", Id: CO"));
   for (byte b : coordId)
     Serial.print(b, HEX);
   Serial.println();
   sprintf(mqttCl, "CO%02X%02X%02X%02X",coordId[0],coordId[1],coordId[2],coordId[3]);
-
+  Serial.println(mqttCl);
 
   battery.setRefInternal();
   //myHumidity.begin();
@@ -214,20 +205,40 @@ void getLocalData(LocalData_t *local) {
 }
 
 void getScaleData(LocalData_t *local) {
-  for (int a = 0; a < 2; a++) {
-    Wire.requestFrom(1, 25);
-    delay(100);
+
+  Wire.requestFrom(1, 24);
+  delay(100);
+  int i = 0;
+  while (Wire.available()&& i < 22) {
+    s1[i] = Wire.read();
+    i++;
+  }
+  Wire.requestFrom(1, 24);
+  delay(100);
+  i = 0;
+  while (Wire.available()&& i < 22) {
+    s2[i] = Wire.read();
+    i++;
+  }
+
+s1[23] = 0;
+s2[23] = 0;
+
+for (size_t i = 0; i < 23; i++) {
+  Serial.print(s1[i]);
+}
+Serial.println();
+  /*for (int a = 0; a < 2; a++) {
+    Wire.requestFrom(1, 24);
+    delay(1000);
     uint8_t i = 0;
     while (Wire.available()) {
       char c = Wire.read();
-      if (c != '<') {
-        local->scales[a][i] = c;
-        i++;
-      } else if (c == '>') {
-        break;
-      }
+      local->scales[a][i] = c;
     }
-  }
+  }*/
+  Serial.println(s1);
+  Serial.println(s2);
 }
 
 //////////// MQTT Code /////////////////////////////////////////////////////////
@@ -251,6 +262,9 @@ void sendMqttData(LocalData_t *local) {
         char buf[120] = "";
         sprintf(buf, "%02X%02X%02X%02X,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%d", plBuffer[b].id[0], plBuffer[b].id[1], plBuffer[b].id[2], plBuffer[b].id[3], plBuffer[b].temp[0], plBuffer[b].temp[1], plBuffer[b].temp[2], plBuffer[b].temp[3], plBuffer[b].temp[4], plBuffer[b].temp[5],plBuffer[b].humidity,plBuffer[b].bat,local->baseTemp,local->baseHum,local->baseLux);
         mqtt.publish("h/d", buf);
+        //char buf2[80] = "";
+        //sprintf(buf2, "%s,%s,%s", mqttCl,s1,s2);
+        //mqtt.publish("c/s", buf2);
       }
       /*
       data = data + String(local->baseHum)
